@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Satellite {
+  id        String   @id @default(cuid())
+  noradId   Int      @unique
+  name      String
+  operator  String?
+  country   String?
+  objectType String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tle TLE[]
+  positions PositionSnapshot[]
+  conjunctionsA ConjunctionEvent[] @relation("satelliteA")
+  conjunctionsB ConjunctionEvent[] @relation("satelliteB")
+
+  @@index([noradId])
+  @@index([createdAt])
+}
+
+model TLE {
+  id          String   @id @default(cuid())
+  satelliteId String
+  satellite   Satellite @relation(fields: [satelliteId], references: [id], onDelete: Cascade)
+  line1       String
+  line2       String
+  epoch       DateTime
+  createdAt   DateTime @default(now())
+
+  @@unique([satelliteId, epoch], name: "satelliteId_epoch")
+  @@index([satelliteId])
+  @@index([epoch])
+}
+
+model PositionSnapshot {
+  id          String   @id @default(cuid())
+  satelliteId String
+  satellite   Satellite @relation(fields: [satelliteId], references: [id], onDelete: Cascade)
+  timestamp   DateTime
+  x           Float
+  y           Float
+  z           Float
+  vx          Float
+  vy          Float
+  vz          Float
+  createdAt   DateTime @default(now())
+
+  @@index([satelliteId, timestamp])
+  @@index([timestamp])
+}
+
+model ConjunctionEvent {
+  id                    String   @id @default(cuid())
+  satelliteAId          String
+  satelliteA            Satellite @relation("satelliteA", fields: [satelliteAId], references: [id], onDelete: Cascade)
+  satelliteBId          String
+  satelliteB            Satellite @relation("satelliteB", fields: [satelliteBId], references: [id], onDelete: Cascade)
+  closestApproachKm     Float
+  relativeVelocityKmS   Float
+  predictedTime         DateTime
+  riskScore             Float
+  riskLevel             String @default("MEDIUM")
+  status                String @default("PREDICTED")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([satelliteAId, satelliteBId])
+  @@index([predictedTime])
+  @@index([riskLevel])
+}

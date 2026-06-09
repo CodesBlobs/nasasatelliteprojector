@@ -1,0 +1,36 @@
+{
+  "name": "orbital",
+  "version": "0.1.0",
+  "description": "Space Traffic Control platform",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "turbo run format",
+    "db:migrate": "cd apps/api && pnpm prisma migrate dev",
+    "db:generate": "cd apps/api && pnpm prisma generate"
+  },
+  "keywords": [
+    "space",
+    "satellite",
+    "orbital-mechanics",
+    "space-traffic-control"
+  ],
+  "author": "Orbital Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}

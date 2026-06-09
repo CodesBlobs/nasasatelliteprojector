@@ -1,0 +1,42 @@
+import { NestFactory } from '@nestjs/core'
+import { ValidationPipe } from '@nestjs/common'
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'
+import { AppModule } from './app.module'
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule)
+  
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    })
+  )
+
+  app.enableCors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    credentials: true,
+  })
+
+  const config = new DocumentBuilder()
+    .setTitle('Orbital API')
+    .setDescription('Space Traffic Control Platform')
+    .setVersion('0.1.0')
+    .addTag('health')
+    .addTag('satellites')
+    .addTag('tle')
+    .addTag('conjunctions')
+    .build()
+
+  const document = SwaggerModule.createDocument(app, config)
+  SwaggerModule.setup('api', app, document)
+
+  const port = process.env.API_PORT || 3001
+  await app.listen(port)
+  console.log(`API running on http://localhost:${port}`)
+  console.log(`Swagger docs at http://localhost:${port}/api`)
+}
+
+bootstrap()
+
