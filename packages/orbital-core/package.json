@@ -11,7 +11,7 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@orbital/shared": "*",
+    "@orbital/shared": "workspace:*",
     "satellite.js": "^5.0.0"
   },
   "devDependencies": {

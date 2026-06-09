@@ -9,11 +9,13 @@
     "start": "next start",
     "lint": "eslint src",
     "format": "prettier --write src",
-    "test": "vitest"
+    "test": "vitest",
+    "postinstall": "node scripts/copy-cesium-assets.mjs"
   },
   "dependencies": {
-    "@orbital/shared": "*",
+    "@orbital/shared": "workspace:*",
     "@tanstack/react-query": "^5.28.0",
+    "cesium": "^1.121.0",
     "clsx": "^2.0.0",
     "next": "^15.0.0",
     "react": "^18.3.0",

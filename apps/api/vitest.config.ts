@@ -6,6 +6,13 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Integration tests share a real DB — run files sequentially to prevent collisions
+    fileParallelism: false,
+    server: {
+      deps: {
+        interopDefault: true,
+      },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

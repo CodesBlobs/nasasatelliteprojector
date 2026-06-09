@@ -38,6 +38,18 @@ export const api = {
     import: (data: unknown) =>
       apiCall('/tle/import', { method: 'POST', body: JSON.stringify(data) }),
   },
+  propagation: {
+    getPosition: (noradId: number, time?: Date) => {
+      const params = time ? `?time=${encodeURIComponent(time.toISOString())}` : ''
+      return apiCall(`/satellites/${noradId}/position${params}`)
+    },
+    getPositions: (noradIds: number[], time?: Date) => {
+      const ids = noradIds.join(',')
+      const timeParam = time ? `&time=${encodeURIComponent(time.toISOString())}` : ''
+      return apiCall(`/satellites/positions?noradIds=${ids}${timeParam}`)
+    },
+    getOrbit: (noradId: number) => apiCall(`/satellites/${noradId}/orbit`),
+  },
   ingest: {
     celestrak: (group: string) =>
       apiCall(`/ingest/celestrak?group=${encodeURIComponent(group)}`, {

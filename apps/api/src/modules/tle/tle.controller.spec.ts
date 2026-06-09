@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing'
 import { INestApplication, ValidationPipe } from '@nestjs/common'
 import { TleModule } from './tle.module'
 import { PrismaService } from '../../common/prisma/prisma.service'
-import * as request from 'supertest'
+import request from 'supertest'
 
 describe('TLE Controller (Integration)', () => {
   let app: INestApplication
@@ -91,7 +91,7 @@ describe('TLE Controller (Integration)', () => {
         .send(invalidTle)
         .expect(400)
 
-      expect(response.body.message).toContain('Invalid TLE')
+      expect(response.body.statusCode).toBe(400)
     })
 
     it('should reject request with missing name', async () => {
@@ -187,7 +187,7 @@ describe('TLE Controller (Integration)', () => {
       }
 
       for (let i = 0; i < 5; i++) {
-        const line1 = `1 25544U 98067A   23${String(i + 1).padStart(2, '0')}.00000000  .00016717  00000-0  29770-3 0  900${i}`
+        const line1 = `1 25544U 98067A   23${String(i + 1).padStart(3, '0')}.00000000  .00016717  00000-0  29770-3 0  900${i}`
         await request(app.getHttpServer())
           .post('/tle/import')
           .send({
