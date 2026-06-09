@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Package manager artifacts (project uses pnpm)
+package-lock.json
+yarn.lock
+
+# Build output
+dist/
+build/
+out/
+
+# Next.js
+.next/
+next-env.d.ts
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Testing
+coverage/
+*.lcov
+test-results/
+
+# Environment variables (keep .env.example files)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+
+# Turborepo
+.turbo/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+.cache/
