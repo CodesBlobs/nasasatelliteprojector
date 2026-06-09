@@ -13,18 +13,19 @@ export function propagateSatellite(
   }
 
   const positionAndVelocity = propagate(satrec, timestamp)
-
-  if (positionAndVelocity.error) {
-    throw new Error('Propagation error: satellite may have decayed')
-  }
-
   const { position, velocity } = positionAndVelocity
 
   if (
     typeof position === 'boolean' ||
     typeof velocity === 'boolean' ||
     !position ||
-    !velocity
+    !velocity ||
+    isNaN(position.x) ||
+    isNaN(position.y) ||
+    isNaN(position.z) ||
+    isNaN(velocity.x) ||
+    isNaN(velocity.y) ||
+    isNaN(velocity.z)
   ) {
     throw new Error('Invalid propagation result')
   }

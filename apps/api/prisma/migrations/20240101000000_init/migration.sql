@@ -1,69 +1,76 @@
--- CreateTable Satellite
+-- CreateTable
 CREATE TABLE "Satellite" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "noradId" INTEGER NOT NULL UNIQUE,
+    "id" TEXT NOT NULL,
+    "noradId" INTEGER NOT NULL,
     "name" TEXT NOT NULL,
     "operator" TEXT,
     "country" TEXT,
     "objectType" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Satellite_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable TLE
+-- CreateTable
 CREATE TABLE "TLE" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "satelliteId" TEXT NOT NULL,
     "line1" TEXT NOT NULL,
     "line2" TEXT NOT NULL,
-    "epoch" DATETIME NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "TLE_satelliteId_fkey" FOREIGN KEY ("satelliteId") REFERENCES "Satellite" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "epoch" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "TLE_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable PositionSnapshot
+-- CreateTable
 CREATE TABLE "PositionSnapshot" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "satelliteId" TEXT NOT NULL,
-    "timestamp" DATETIME NOT NULL,
-    "x" REAL NOT NULL,
-    "y" REAL NOT NULL,
-    "z" REAL NOT NULL,
-    "vx" REAL NOT NULL,
-    "vy" REAL NOT NULL,
-    "vz" REAL NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "PositionSnapshot_satelliteId_fkey" FOREIGN KEY ("satelliteId") REFERENCES "Satellite" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "timestamp" TIMESTAMP(3) NOT NULL,
+    "x" DOUBLE PRECISION NOT NULL,
+    "y" DOUBLE PRECISION NOT NULL,
+    "z" DOUBLE PRECISION NOT NULL,
+    "vx" DOUBLE PRECISION NOT NULL,
+    "vy" DOUBLE PRECISION NOT NULL,
+    "vz" DOUBLE PRECISION NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PositionSnapshot_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable ConjunctionEvent
+-- CreateTable
 CREATE TABLE "ConjunctionEvent" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "satelliteAId" TEXT NOT NULL,
     "satelliteBId" TEXT NOT NULL,
-    "closestApproachKm" REAL NOT NULL,
-    "relativeVelocityKmS" REAL NOT NULL,
-    "predictedTime" DATETIME NOT NULL,
-    "riskScore" REAL NOT NULL,
+    "closestApproachKm" DOUBLE PRECISION NOT NULL,
+    "relativeVelocityKmS" DOUBLE PRECISION NOT NULL,
+    "predictedTime" TIMESTAMP(3) NOT NULL,
+    "riskScore" DOUBLE PRECISION NOT NULL,
     "riskLevel" TEXT NOT NULL DEFAULT 'MEDIUM',
     "status" TEXT NOT NULL DEFAULT 'PREDICTED',
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "ConjunctionEvent_satelliteAId_fkey" FOREIGN KEY ("satelliteAId") REFERENCES "Satellite" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "ConjunctionEvent_satelliteBId_fkey" FOREIGN KEY ("satelliteBId") REFERENCES "Satellite" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ConjunctionEvent_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "TLE_satelliteId_epoch_key" ON "TLE"("satelliteId", "epoch");
-
--- CreateIndex
-CREATE INDEX "TLE_satelliteId_idx" ON "TLE"("satelliteId");
+CREATE UNIQUE INDEX "Satellite_noradId_key" ON "Satellite"("noradId");
 
 -- CreateIndex
 CREATE INDEX "Satellite_noradId_idx" ON "Satellite"("noradId");
 
 -- CreateIndex
 CREATE INDEX "Satellite_createdAt_idx" ON "Satellite"("createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "TLE_satelliteId_epoch_key" ON "TLE"("satelliteId", "epoch");
+
+-- CreateIndex
+CREATE INDEX "TLE_satelliteId_idx" ON "TLE"("satelliteId");
 
 -- CreateIndex
 CREATE INDEX "PositionSnapshot_satelliteId_timestamp_idx" ON "PositionSnapshot"("satelliteId", "timestamp");
@@ -79,3 +86,15 @@ CREATE INDEX "ConjunctionEvent_predictedTime_idx" ON "ConjunctionEvent"("predict
 
 -- CreateIndex
 CREATE INDEX "ConjunctionEvent_riskLevel_idx" ON "ConjunctionEvent"("riskLevel");
+
+-- AddForeignKey
+ALTER TABLE "TLE" ADD CONSTRAINT "TLE_satelliteId_fkey" FOREIGN KEY ("satelliteId") REFERENCES "Satellite"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PositionSnapshot" ADD CONSTRAINT "PositionSnapshot_satelliteId_fkey" FOREIGN KEY ("satelliteId") REFERENCES "Satellite"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ConjunctionEvent" ADD CONSTRAINT "ConjunctionEvent_satelliteAId_fkey" FOREIGN KEY ("satelliteAId") REFERENCES "Satellite"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ConjunctionEvent" ADD CONSTRAINT "ConjunctionEvent_satelliteBId_fkey" FOREIGN KEY ("satelliteBId") REFERENCES "Satellite"("id") ON DELETE CASCADE ON UPDATE CASCADE;

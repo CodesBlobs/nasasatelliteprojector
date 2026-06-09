@@ -35,6 +35,14 @@ export function Sidebar() {
         >
           Alerts
         </Link>
+        <Link
+          href="/globe"
+          className={`block px-4 py-2 rounded transition ${
+            isActive('/globe') ? 'bg-purple-600' : 'hover:bg-slate-700'
+          }`}
+        >
+          3D Globe
+        </Link>
       </nav>
       <div className="border-t border-slate-700 px-4 py-4 text-sm text-slate-400">
         <p>v0.1.0</p>

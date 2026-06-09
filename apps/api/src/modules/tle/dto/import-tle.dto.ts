@@ -1,4 +1,4 @@
-import { IsString, Length, MinLength } from 'class-validator'
+import { IsOptional, IsString, Length, MinLength } from 'class-validator'
 import { ApiProperty } from '@nestjs/swagger'
 
 export class ImportTleDto {
@@ -31,6 +31,7 @@ export class ImportTleDto {
     description: 'Country of origin (optional)',
     required: false,
   })
+  @IsOptional()
   @IsString()
   country?: string
 
@@ -39,6 +40,7 @@ export class ImportTleDto {
     description: 'Satellite operator (optional)',
     required: false,
   })
+  @IsOptional()
   @IsString()
   operator?: string
 }

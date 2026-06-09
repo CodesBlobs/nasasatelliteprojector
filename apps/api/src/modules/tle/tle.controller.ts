@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Query, ParseIntPipe } from '@nestjs/common'
+import { Controller, Post, Get, Body, Param, Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger'
 import { TleService, ImportTleResult } from './tle.service'
 import { ImportTleDto } from './dto/import-tle.dto'
@@ -36,7 +36,7 @@ export class TleController {
     summary: 'List latest TLEs',
     description: 'Get the latest TLE for each satellite',
   })
-  async listLatest(@Query('limit') limit?: number) {
+  async listLatest(@Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number) {
     return this.service.listLatestTles(limit)
   }
 
@@ -58,7 +58,7 @@ export class TleController {
   })
   async getHistory(
     @Param('noradId', ParseIntPipe) noradId: number,
-    @Query('limit') limit?: number
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number
   ) {
     return this.service.getTleHistory(noradId, limit)
   }

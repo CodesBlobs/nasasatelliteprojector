@@ -13,10 +13,10 @@ import { PrismaModule } from './common/prisma/prisma.module'
   imports: [
     PrismaModule,
     HealthModule,
+    PropagationModule,
     SatellitesModule,
     TleModule,
     IngestModule,
-    PropagationModule,
     ConjunctionsModule,
     AlertsModule,
     SimulationModule,
