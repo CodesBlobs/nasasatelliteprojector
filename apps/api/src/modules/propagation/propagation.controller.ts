@@ -1,5 +1,5 @@
-import { Controller, Get, Param, Query, ParseIntPipe } from '@nestjs/common'
-import { ApiTags, ApiOperation, ApiParam, ApiQuery } from '@nestjs/swagger'
+import { Controller, Get, Post, Body, Param, Query, ParseIntPipe } from '@nestjs/common'
+import { ApiTags, ApiOperation, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger'
 import { PropagationService } from './propagation.service'
 import { PropagateQueryDto } from './dto/propagate.dto'
 
@@ -22,6 +22,17 @@ export class PropagationController {
       .filter((n) => !isNaN(n))
     const timestamp = time ? new Date(time) : undefined
     return this.service.getPositions(noradIds, timestamp)
+  }
+
+  @Post('positions')
+  @ApiOperation({ summary: 'Get positions for many satellites (POST body for large sets)' })
+  @ApiBody({ schema: { properties: { noradIds: { type: 'array', items: { type: 'number' } }, time: { type: 'string' } } } })
+  async getPositionsPost(
+    @Body() body: { noradIds: number[]; time?: string },
+    @Query('time') timeQuery?: string,
+  ) {
+    const timestamp = body.time ? new Date(body.time) : timeQuery ? new Date(timeQuery) : undefined
+    return this.service.getPositions(body.noradIds ?? [], timestamp)
   }
 
   @Get(':noradId/position')
