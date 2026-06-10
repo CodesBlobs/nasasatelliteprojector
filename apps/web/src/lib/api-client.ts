@@ -44,11 +44,19 @@ export const api = {
       return apiCall(`/satellites/${noradId}/position${params}`)
     },
     getPositions: (noradIds: number[], time?: Date) => {
-      const ids = noradIds.join(',')
-      const timeParam = time ? `&time=${encodeURIComponent(time.toISOString())}` : ''
-      return apiCall(`/satellites/positions?noradIds=${ids}${timeParam}`)
+      return apiCall(`/satellites/positions`, {
+        method: 'POST',
+        body: JSON.stringify({ noradIds, time: time?.toISOString() }),
+      })
     },
     getOrbit: (noradId: number) => apiCall(`/satellites/${noradId}/orbit`),
+  },
+  conjunctions: {
+    list: () => apiCall('/conjunctions'),
+    active: () => apiCall('/conjunctions/active'),
+    get: (id: string) => apiCall(`/conjunctions/${id}`),
+    scan: (options?: { windowHours?: number; sampleMinutes?: number; thresholdKm?: number }) =>
+      apiCall('/conjunctions/scan', { method: 'POST', body: JSON.stringify(options ?? {}) }),
   },
   ingest: {
     celestrak: (group: string) =>

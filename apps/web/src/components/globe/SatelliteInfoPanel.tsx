@@ -8,9 +8,10 @@ interface Props {
   position: SatellitePosition
   altitudeKm: number
   speedKms: number
+  conjunctionCount: number
 }
 
-export function SatelliteInfoPanel({ satellite, altitudeKm, speedKms }: Props) {
+export function SatelliteInfoPanel({ satellite, altitudeKm, speedKms, conjunctionCount }: Props) {
   return (
     <div className="bg-slate-900/90 border border-cyan-800 rounded-lg backdrop-blur-sm p-3 space-y-2">
       <div className="flex items-start justify-between gap-2">
@@ -26,6 +27,11 @@ export function SatelliteInfoPanel({ satellite, altitudeKm, speedKms }: Props) {
       <div className="grid grid-cols-2 gap-2">
         <StatBox label="Altitude" value={`${altitudeKm.toFixed(0)} km`} />
         <StatBox label="Speed" value={`${speedKms.toFixed(2)} km/s`} />
+        <StatBox
+          label="Conjunctions"
+          value={conjunctionCount === 0 ? 'None' : `${conjunctionCount} active`}
+          highlight={conjunctionCount > 0}
+        />
         {satellite.country && (
           <StatBox label="Country" value={satellite.country} />
         )}
@@ -37,11 +43,11 @@ export function SatelliteInfoPanel({ satellite, altitudeKm, speedKms }: Props) {
   )
 }
 
-function StatBox({ label, value }: { label: string; value: string }) {
+function StatBox({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className="bg-slate-800/60 rounded px-2 py-1.5">
+    <div className={`rounded px-2 py-1.5 ${highlight ? 'bg-red-950/60 border border-red-800' : 'bg-slate-800/60'}`}>
       <p className="text-[9px] text-slate-500 uppercase tracking-wider">{label}</p>
-      <p className="text-xs text-white font-mono mt-0.5 truncate">{value}</p>
+      <p className={`text-xs font-mono mt-0.5 truncate ${highlight ? 'text-red-400' : 'text-white'}`}>{value}</p>
     </div>
   )
 }
