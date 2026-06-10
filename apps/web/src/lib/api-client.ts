@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+// Requests go to Next.js' own origin, which proxies /api/* → the NestJS backend.
+// This avoids cross-origin issues entirely and survives race conditions on startup.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
 export async function apiCall<T>(
   endpoint: string,

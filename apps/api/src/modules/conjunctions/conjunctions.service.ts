@@ -80,6 +80,7 @@ export class ConjunctionsService {
       .map((s) => ({
         satelliteId: s.id,
         noradId: s.noradId,
+        name: s.name,
         line1: s.tle[0].line1,
         line2: s.tle[0].line2,
       }))

@@ -36,6 +36,14 @@ export function Sidebar() {
           Alerts
         </Link>
         <Link
+          href="/collisions"
+          className={`block px-4 py-2 rounded transition ${
+            isActive('/collisions') ? 'bg-red-700' : 'hover:bg-slate-700'
+          }`}
+        >
+          Collisions
+        </Link>
+        <Link
           href="/globe"
           className={`block px-4 py-2 rounded transition ${
             isActive('/globe') ? 'bg-purple-600' : 'hover:bg-slate-700'

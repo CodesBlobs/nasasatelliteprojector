@@ -1,8 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api-client'
-import { altitudeKm, eciToEcefMeters, speedKms } from '@/lib/cesium-utils'
+import { altitudeKm, eciToEcefMeters, eciToLatLon, speedKms } from '@/lib/cesium-utils'
 import { worstSeverity, type Severity } from '@/lib/severity'
 import { CesiumContainer, type ConjunctionVisual, type SatellitePosition } from './CesiumContainer'
 import { SatelliteListPanel } from './SatelliteListPanel'
@@ -17,6 +17,36 @@ export interface Satellite {
   objectType: string
   country: string | null
   operator: string | null
+  meanMotion: number | null
+}
+
+type CategoryFilter = 'all' | 'starlink' | 'stations' | 'debris' | 'rocket' | 'other'
+type OrbitFilter = 'all' | 'leo' | 'meo' | 'geo' | 'heo'
+
+function getCategory(name: string, objectType: string): Exclude<CategoryFilter, 'all'> {
+  const n = name.toUpperCase()
+  const t = (objectType ?? '').toUpperCase()
+  if (n.includes('STARLINK')) return 'starlink'
+  if (
+    /^ISS[\s(]|^ISS$/.test(n) ||
+    n.includes('TIANGONG') ||
+    n.includes('TIANHE') ||
+    n.includes('SHENZHOU') ||
+    /^CSS[\s(]/.test(n) ||
+    /\bZARYA\b|\bZVEZDA\b|\bNAUKA\b|\bPIRS\b|\bRASSVET\b|\bPRICHAL\b/.test(n) ||
+    /\bUNITY\b|\bHARMONY\b|\bTRANQUILITY\b|\bSERENITY\b|\bDESTINY\b|\bCUPOLA\b/.test(n)
+  ) return 'stations'
+  if (t === 'DEBRIS') return 'debris'
+  if (t === 'ROCKET BODY') return 'rocket'
+  return 'other'
+}
+
+function getOrbitRegime(meanMotion: number | null | undefined): Exclude<OrbitFilter, 'all'> | 'unknown' {
+  if (meanMotion == null || isNaN(meanMotion)) return 'unknown'
+  if (meanMotion > 11.25) return 'leo'
+  if (meanMotion >= 1.1) return 'meo'
+  if (meanMotion >= 0.9) return 'geo'
+  return 'heo'
 }
 
 export interface ConjunctionSatellite {
@@ -54,21 +84,12 @@ interface OrbitTrack {
   points: OrbitPoint[]
 }
 
-
-const POSITION_POLL_INTERVAL = 5000
+const POSITION_POLL_INTERVAL = 8000
 const CONJUNCTION_POLL_INTERVAL = 30000
 const ORBIT_REFRESH_INTERVAL = 60000
-
-const TYPE_OPTIONS = [
-  { label: 'Payload', color: '#22d3ee' },
-  { label: 'Rocket Body', color: '#fb923c' },
-  { label: 'Debris', color: '#94a3b8' },
-]
-const DISPLAY_LIMITS = [
-  { label: '1k', value: 1000 },
-  { label: '5k', value: 5000 },
-  { label: 'All', value: 0 },
-]
+const MAX_SEARCH_ON_GLOBE = 20
+const CLUSTER_RADIUS_KM = 2000
+const RENDER_PRESETS = [100, 500, 1000, 2500, 5000, 10000, 15000]
 
 export default function GlobeView() {
   const [satellites, setSatellites] = useState<Satellite[]>([])
@@ -79,68 +100,189 @@ export default function GlobeView() {
   const [selectedConjunctionId, setSelectedConjunctionId] = useState<string | null>(null)
   const [approachPoints, setApproachPoints] = useState<Map<string, { x: number; y: number; z: number }>>(new Map())
   const [isScanning, setIsScanning] = useState(false)
+  const [search, setSearch] = useState('')
+  const [backgroundCount, setBackgroundCount] = useState(500)
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all')
+  const [orbitFilter, setOrbitFilter] = useState<OrbitFilter>('all')
+  const resetViewRef = useRef<(() => void) | null>(null)
 
   const [simulatedTime, setSimulatedTime] = useState(() => new Date())
   const [isPlaying, setIsPlaying] = useState(true)
   const [timeSpeed, setTimeSpeed] = useState<1 | 10 | 100 | 1000>(1)
-  const [activeTypes, setActiveTypes] = useState<Set<string>>(() => new Set(['Payload', 'Rocket Body', 'Debris']))
-  const [displayLimit, setDisplayLimit] = useState(5000)
-
-  const visibleSatellites = useMemo(() => {
-    const filtered = satellites.filter(s => activeTypes.has(s.objectType))
-    return displayLimit === 0 ? filtered : filtered.slice(0, displayLimit)
-  }, [satellites, activeTypes, displayLimit])
-
-  function toggleType(type: string) {
-    setActiveTypes(prev => {
-      const next = new Set(prev)
-      next.has(type) ? next.delete(type) : next.add(type)
-      return next
-    })
-  }
 
   const simulatedTimeRef = useRef(simulatedTime)
   simulatedTimeRef.current = simulatedTime
 
-  // Advance simulated time
+  // Fast lookup map for satellite metadata
+  const satelliteMap = useMemo(() => {
+    const m = new Map<number, Satellite>()
+    for (const s of satellites) m.set(s.noradId, s)
+    return m
+  }, [satellites])
+
+  // noradIds of satellites involved in any active conjunction
+  const conjunctionNoradIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const c of conjunctions) {
+      ids.add(c.satelliteA.noradId)
+      ids.add(c.satelliteB.noradId)
+    }
+    return ids
+  }, [conjunctions])
+
+  // Returns true if a satellite passes the active category + orbit filters.
+  // Satellites with unknown orbit (no TLE) always pass the orbit filter.
+  const passesFilter = useCallback(
+    (s: Satellite): boolean => {
+      if (categoryFilter !== 'all' && getCategory(s.name, s.objectType) !== categoryFilter) return false
+      if (orbitFilter !== 'all') {
+        const regime = getOrbitRegime(s.meanMotion)
+        if (regime !== 'unknown' && regime !== orbitFilter) return false
+      }
+      return true
+    },
+    [categoryFilter, orbitFilter],
+  )
+
+  // Pre-filtered catalogue for the background slot
+  const filteredCatalogue = useMemo(
+    () => satellites.filter(passesFilter),
+    [satellites, passesFilter],
+  )
+
+  // What gets propagated and rendered:
+  // filtered background + filtered conjunction sats + selected + search matches
+  const activeSatellites = useMemo(() => {
+    const ids = new Set<number>()
+
+    // Background: first N from filtered catalogue
+    for (let i = 0; i < Math.min(backgroundCount, filteredCatalogue.length); i++) {
+      ids.add(filteredCatalogue[i].noradId)
+    }
+
+    // Conjunction sats: apply same filter so toggling actually changes what you see
+    for (const id of conjunctionNoradIds) {
+      const sat = satelliteMap.get(id)
+      if (!sat || passesFilter(sat)) ids.add(id)
+    }
+
+    // Selected always shows
+    if (selectedNoradId !== null) ids.add(selectedNoradId)
+
+    // Search: bypass filter (user explicitly searched)
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      let count = 0
+      for (const s of satellites) {
+        if (count >= MAX_SEARCH_ON_GLOBE) break
+        if (s.name.toLowerCase().includes(q) || s.noradId.toString().includes(q)) {
+          ids.add(s.noradId)
+          count++
+        }
+      }
+    }
+
+    return satellites.filter((s) => ids.has(s.noradId))
+  }, [filteredCatalogue, satellites, satelliteMap, conjunctionNoradIds, selectedNoradId, search, backgroundCount, passesFilter])
+
+  // Satellites within CLUSTER_RADIUS_KM of the selected satellite (in ECI space)
+  const nearbyNoradIds = useMemo(() => {
+    if (selectedNoradId === null) return new Set<number>()
+    const selPos = positions.get(selectedNoradId)
+    if (!selPos) return new Set<number>()
+    const ids = new Set<number>()
+    positions.forEach((pos, noradId) => {
+      if (noradId === selectedNoradId) return
+      const dx = pos.position.x - selPos.position.x
+      const dy = pos.position.y - selPos.position.y
+      const dz = pos.position.z - selPos.position.z
+      if (dx * dx + dy * dy + dz * dz < CLUSTER_RADIUS_KM * CLUSTER_RADIUS_KM) {
+        ids.add(noradId)
+      }
+    })
+    return ids
+  }, [selectedNoradId, positions])
+
+  // Conjunction events involving the selected satellite
+  const selectedSatConjunctions = useMemo(
+    () =>
+      selectedNoradId === null
+        ? []
+        : conjunctions.filter(
+            (c) =>
+              c.satelliteA.noradId === selectedNoradId ||
+              c.satelliteB.noradId === selectedNoradId,
+          ),
+    [conjunctions, selectedNoradId],
+  )
+
+  // Advance simulated time — low-priority so it doesn't block Cesium's rAF
   useEffect(() => {
     if (!isPlaying) return
     const id = setInterval(() => {
-      setSimulatedTime((t) => new Date(t.getTime() + 1000 * timeSpeed))
+      startTransition(() => {
+        setSimulatedTime((t) => new Date(t.getTime() + 1000 * timeSpeed))
+      })
     }, 1000)
     return () => clearInterval(id)
   }, [isPlaying, timeSpeed])
 
-  // Load satellite list once
-   useEffect(() => {
+  // Load satellite catalogue — show first page immediately, stream the rest.
+  // Retries with backoff to handle the API not being ready on first render.
+  useEffect(() => {
+    let cancelled = false
+
+    async function fetchWithRetry(skip: number, take: number): Promise<SatelliteList> {
+      let delay = 1500
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return (await api.satellites.list(skip, take)) as SatelliteList
+        } catch (err) {
+          if (cancelled) throw err
+          if (attempt >= 8) throw err
+          await new Promise((r) => setTimeout(r, delay))
+          delay = Math.min(delay * 1.5, 6000)
+        }
+      }
+    }
+
     async function loadAll() {
       const PAGE = 1000
       let skip = 0
+      let total = Infinity
       const all: Satellite[] = []
-      while (true) {
-        const data = (await api.satellites.list(skip, PAGE)) as SatelliteList
+      while (all.length < total) {
+        const data = await fetchWithRetry(skip, PAGE)
+        if (cancelled) return
+        total = data.pagination.total
         all.push(...data.data)
-        if (all.length >= data.pagination.total || data.data.length < PAGE) break
+        setSatellites([...all])
+        if (data.data.length < PAGE) break
         skip += PAGE
       }
-      setSatellites(all)
     }
-    loadAll().catch(console.error)
+
+    loadAll().catch((err) => {
+      if (!cancelled) console.error('Failed to load satellite catalogue:', err)
+    })
+    return () => { cancelled = true }
   }, [])
 
-  // Immediately cull positions when filter changes — don't wait for next fetch
+  // Cull positions when active set shrinks
   useEffect(() => {
-    const visibleIds = new Set(visibleSatellites.map(s => s.noradId))
-    setPositions(prev => {
-      const next = new Map<number, SatellitePosition>()
-      prev.forEach((pos, id) => { if (visibleIds.has(id)) next.set(id, pos) })
-      return next
+    const activeIds = new Set(activeSatellites.map((s) => s.noradId))
+    startTransition(() => {
+      setPositions((prev) => {
+        const next = new Map<number, SatellitePosition>()
+        prev.forEach((pos, id) => { if (activeIds.has(id)) next.set(id, pos) })
+        return next
+      })
     })
-  }, [visibleSatellites])
+  }, [activeSatellites])
 
-  // Poll positions
+  // Poll positions — only for the active (small) set
   useEffect(() => {
-    const noradIds = visibleSatellites.map((s) => s.noradId)
+    const noradIds = activeSatellites.map((s) => s.noradId)
     if (noradIds.length === 0) return
 
     let cancelled = false
@@ -153,7 +295,9 @@ export default function GlobeView() {
           simulatedTimeRef.current,
         )) as SatellitePosition[]
         if (!cancelled) {
-          setPositions(new Map(results.map((p) => [p.noradId, p])))
+          startTransition(() => {
+            setPositions(new Map(results.map((p) => [p.noradId, p])))
+          })
         }
       } catch (err) {
         console.error('Position fetch failed:', err)
@@ -166,9 +310,9 @@ export default function GlobeView() {
       cancelled = true
       clearInterval(id)
     }
-  }, [visibleSatellites])
+  }, [activeSatellites])
 
-  // Fetch orbit track for selected satellite, refreshed every minute
+  // Fetch orbit track for selected satellite
   useEffect(() => {
     if (selectedNoradId === null) {
       setOrbitTrack(null)
@@ -193,8 +337,6 @@ export default function GlobeView() {
     }
   }, [selectedNoradId])
 
-  // Poll active conjunctions. Keep previous array identity when nothing changed
-  // so downstream effects (markers, approach-point fetches) don't re-run.
   const fetchConjunctions = useCallback(async () => {
     try {
       const events = (await api.conjunctions.active()) as Conjunction[]
@@ -214,8 +356,7 @@ export default function GlobeView() {
     return () => clearInterval(id)
   }, [fetchConjunctions])
 
-  // Propagate each conjunction pair at its predicted time to place the
-  // closest-approach marker (ECEF midpoint between the two satellites)
+  // Place approach markers at predicted closest-approach positions
   useEffect(() => {
     if (conjunctions.length === 0) {
       setApproachPoints(new Map())
@@ -251,12 +392,9 @@ export default function GlobeView() {
     }
 
     loadApproachPoints()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [conjunctions])
 
-  // Worst active severity per satellite, used to color points on the globe
   const severityBySat = useMemo(() => {
     const map = new Map<number, Severity>()
     for (const c of conjunctions) {
@@ -305,52 +443,54 @@ export default function GlobeView() {
 
   const selectedSat = satellites.find((s) => s.noradId === selectedNoradId) ?? null
   const selectedPos = selectedNoradId !== null ? positions.get(selectedNoradId) ?? null : null
-  const selectedSatConjunctionCount =
-    selectedNoradId === null
-      ? 0
-      : conjunctions.filter(
-          (c) =>
-            c.satelliteA.noradId === selectedNoradId || c.satelliteB.noradId === selectedNoradId,
-        ).length
+  const selectedLatLon = selectedPos
+    ? eciToLatLon(selectedPos.position, new Date(selectedPos.timestamp))
+    : null
 
   return (
     <div className="absolute inset-0 bg-black">
       <CesiumContainer
-        satellites={satellites}
+        satellites={activeSatellites}
         positions={positions}
         orbitPoints={orbitTrack}
         selectedNoradId={selectedNoradId}
+        nearbyNoradIds={nearbyNoradIds}
         conjunctions={conjunctionVisuals}
         severityBySat={severityBySat}
         selectedConjunctionId={selectedConjunctionId}
         onSelectSatellite={handleSelectSatellite}
         onSelectConjunction={handleSelectConjunction}
+        onReady={(controls) => { resetViewRef.current = controls.resetView }}
       />
 
-      {/* Satellite list — top-left overlay */}
+      {/* Satellite list — top-left: shows filtered catalogue */}
       <div className="absolute top-3 left-3 z-10 w-64 max-h-[60vh] flex flex-col">
         <SatelliteListPanel
-          satellites={satellites}
+          satellites={filteredCatalogue}
           positions={positions}
           selectedNoradId={selectedNoradId}
+          search={search}
+          onSearchChange={setSearch}
           onSelect={handleSelectSatellite}
         />
       </div>
 
-      {/* Selected satellite info — bottom-left overlay */}
-      {selectedSat && selectedPos && (
+      {/* Selected satellite info — always show once a satellite is selected */}
+      {selectedSat && (
         <div className="absolute bottom-16 left-3 z-10 w-64">
           <SatelliteInfoPanel
             satellite={selectedSat}
             position={selectedPos}
-            altitudeKm={altitudeKm(selectedPos.position)}
-            speedKms={speedKms(selectedPos.velocity)}
-            conjunctionCount={selectedSatConjunctionCount}
+            altitudeKm={selectedPos ? altitudeKm(selectedPos.position) : null}
+            speedKms={selectedPos ? speedKms(selectedPos.velocity) : null}
+            conjunctions={selectedSatConjunctions}
+            lat={selectedLatLon?.lat ?? null}
+            lon={selectedLatLon?.lon ?? null}
           />
         </div>
       )}
 
-      {/* Time controls — bottom center overlay */}
+      {/* Time controls — bottom center */}
       <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
         <TimeControlsBar
           simulatedTime={simulatedTime}
@@ -362,43 +502,99 @@ export default function GlobeView() {
         />
       </div>
 
-      {/* Filter panel */}
-      <div className="absolute top-3 right-3 z-10 flex flex-col gap-2 items-end">
-        <div className="bg-slate-900/90 border border-slate-700 rounded-lg px-3 py-2 flex flex-col gap-2">
-          <div className="flex gap-2 items-center">
-            {TYPE_OPTIONS.map(({ label, color }) => (
+      {/* Reset view button */}
+      <button
+        onClick={() => resetViewRef.current?.()}
+        className="absolute bottom-16 right-3 z-10 bg-slate-900/80 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white rounded-lg px-3 py-1.5 text-xs transition-colors"
+        title="Reset camera"
+      >
+        ⊕ Reset View
+      </button>
+
+      {/* Status + render count picker + filters */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          <div className="bg-slate-900/80 border border-slate-700 rounded-full px-3 py-1 text-xs text-slate-400 whitespace-nowrap">
+            {positions.size > 0 ? (
+              <span>
+                <span className="text-cyan-400 font-medium">{positions.size}</span> live
+                {conjunctionNoradIds.size > 0 && (
+                  <span className="text-amber-400 ml-2">· {conjunctionNoradIds.size} at risk</span>
+                )}
+              </span>
+            ) : (
+              <span className="text-slate-500">Loading catalogue ({satellites.length} loaded)…</span>
+            )}
+          </div>
+          <div className="bg-slate-900/80 border border-slate-700 rounded-full flex items-center gap-1 px-2 py-1">
+            <span className="text-[10px] text-slate-500 mr-1">Render</span>
+            {RENDER_PRESETS.map((n) => (
               <button
-                key={label}
-                onClick={() => toggleType(label)}
-                className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border transition-opacity ${activeTypes.has(label) ? 'opacity-100' : 'opacity-30'}`}
-                style={{ borderColor: color, color }}
+                key={n}
+                onClick={() => setBackgroundCount(n)}
+                className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${backgroundCount === n ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
               >
-                <span className="w-2 h-2 rounded-full" style={{ background: color }} />
-                {label}
+                {n >= 1000 ? `${n / 1000}k` : String(n)}
               </button>
             ))}
-          </div>
-          <div className="flex gap-1 items-center justify-between">
-            <span className="text-xs text-slate-500">Show</span>
-            <div className="flex gap-1">
-              {DISPLAY_LIMITS.map(({ label, value }) => (
-                <button
-                  key={label}
-                  onClick={() => setDisplayLimit(value)}
-                  className={`px-2 py-0.5 rounded text-xs border transition-colors ${displayLimit === value ? 'bg-slate-600 border-slate-500 text-white' : 'border-slate-700 text-slate-400 hover:border-slate-500'}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <span className="text-xs text-slate-500 ml-1">{positions.size} tracked</span>
+            <input
+              type="number"
+              min={1}
+              max={satellites.length || 15000}
+              value={backgroundCount}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10)
+                if (!isNaN(v) && v > 0) setBackgroundCount(v)
+              }}
+              className="w-14 bg-slate-800 border border-slate-600 rounded-full px-2 py-0.5 text-[10px] text-white text-center focus:outline-none focus:border-cyan-500 ml-1"
+            />
           </div>
         </div>
 
+        {/* Filter bar */}
+        <div className="bg-slate-900/80 border border-slate-700 rounded-full flex items-center gap-0.5 px-2 py-1">
+          <span className="text-[10px] text-slate-500 mr-1">Type</span>
+          {([
+            ['all', 'All'],
+            ['starlink', 'Starlink'],
+            ['stations', 'Stations'],
+            ['debris', 'Debris'],
+            ['rocket', 'Rocket Body'],
+            ['other', 'Other'],
+          ] as [CategoryFilter, string][]).map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setCategoryFilter(val)}
+              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${categoryFilter === val ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="text-[10px] text-slate-600 mx-1">|</span>
+          <span className="text-[10px] text-slate-500 mr-1">Orbit</span>
+          {([
+            ['all', 'All'],
+            ['leo', 'LEO'],
+            ['meo', 'MEO'],
+            ['geo', 'GEO'],
+            ['heo', 'HEO'],
+          ] as [OrbitFilter, string][]).map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setOrbitFilter(val)}
+              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${orbitFilter === val ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Collision panel — top-right */}
+      <div className="absolute top-3 right-3 z-10">
         <CollisionPanel
           conjunctions={conjunctions}
           selectedId={selectedConjunctionId}
-          now={simulatedTime}
           isScanning={isScanning}
           onSelect={handleSelectConjunction}
           onScan={handleScan}

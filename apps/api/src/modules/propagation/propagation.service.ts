@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { PrismaService } from '../../common/prisma/prisma.service'
 import { propagateSatellite, propagateMultiple } from '@orbital/core'
 import { SatelliteNotFoundException } from './exceptions/satellite-not-found.exception'
@@ -8,10 +8,47 @@ import type { PropagatedPosition, OrbitTrack } from './interfaces/propagated-pos
 const ORBIT_POINTS = 100
 const ORBIT_DURATION_MINUTES = 90
 const ORBIT_INTERVAL_SECONDS = (ORBIT_DURATION_MINUTES * 60) / ORBIT_POINTS
+// Refresh the in-memory TLE cache every 30 minutes
+const TLE_CACHE_TTL_MS = 30 * 60 * 1000
 
 @Injectable()
-export class PropagationService {
+export class PropagationService implements OnModuleInit {
+  private readonly logger = new Logger(PropagationService.name)
+  private tleCache = new Map<number, { line1: string; line2: string }>()
+  private tleCacheLoadedAt = 0
+
   constructor(private prisma: PrismaService) {}
+
+  async onModuleInit() {
+    this.loadTleCache().catch((err) => this.logger.error('TLE cache pre-load failed', err))
+  }
+
+  private async loadTleCache(): Promise<void> {
+    const PAGE = 5000
+    let skip = 0
+    const next = new Map<number, { line1: string; line2: string }>()
+    for (;;) {
+      const rows = await this.prisma.satellite.findMany({
+        skip,
+        take: PAGE,
+        include: { tle: { orderBy: { epoch: 'desc' }, take: 1, select: { line1: true, line2: true } } },
+      })
+      for (const sat of rows) {
+        if (sat.tle[0]) next.set(sat.noradId, { line1: sat.tle[0].line1, line2: sat.tle[0].line2 })
+      }
+      skip += PAGE
+      if (rows.length < PAGE) break
+    }
+    this.tleCache = next
+    this.tleCacheLoadedAt = Date.now()
+    this.logger.log(`TLE cache loaded: ${this.tleCache.size} satellites`)
+  }
+
+  private async ensureCache(): Promise<void> {
+    if (Date.now() - this.tleCacheLoadedAt > TLE_CACHE_TTL_MS) {
+      await this.loadTleCache()
+    }
+  }
 
   async getPosition(noradId: number, timestamp?: Date): Promise<PropagatedPosition> {
     const { satellite, tle } = await this.fetchSatelliteWithTle(noradId)
@@ -56,27 +93,19 @@ export class PropagationService {
 
   async getPositions(noradIds: number[], timestamp?: Date): Promise<PropagatedPosition[]> {
     if (noradIds.length === 0) return []
+    await this.ensureCache()
     const at = timestamp ?? new Date()
-
-    const satellites = await this.prisma.satellite.findMany({
-      where: { noradId: { in: noradIds } },
-      include: { tle: { orderBy: { epoch: 'desc' }, take: 1 } },
-    })
+    const ts = at.toISOString()
 
     const results: PropagatedPosition[] = []
-    for (const satellite of satellites) {
-      const tle = satellite.tle[0]
+    for (const noradId of noradIds) {
+      const tle = this.tleCache.get(noradId)
       if (!tle) continue
       try {
         const result = propagateSatellite(tle.line1, tle.line2, at)
-        results.push({
-          noradId: satellite.noradId,
-          timestamp: at.toISOString(),
-          position: result.position,
-          velocity: result.velocity,
-        })
+        results.push({ noradId, timestamp: ts, position: result.position, velocity: result.velocity })
       } catch {
-        // Skip satellites that fail propagation
+        // skip decayed / bad TLE
       }
     }
     return results

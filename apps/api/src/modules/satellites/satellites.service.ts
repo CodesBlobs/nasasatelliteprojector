@@ -26,16 +26,27 @@ export class SatellitesService {
   }
 
   async findAll(skip = 0, take = 100) {
-    const satellites = await this.prisma.satellite.findMany({
-      skip,
-      take: Math.min(take, 1000),
-      orderBy: { createdAt: 'desc' },
-    })
-
-    const total = await this.prisma.satellite.count()
+    const [satellites, total] = await Promise.all([
+      this.prisma.satellite.findMany({
+        skip,
+        take: Math.min(take, 1000),
+        orderBy: { createdAt: 'desc' },
+        include: {
+          tle: {
+            orderBy: { epoch: 'desc' },
+            take: 1,
+            select: { line2: true },
+          },
+        },
+      }),
+      this.prisma.satellite.count(),
+    ])
 
     return {
-      data: satellites,
+      data: satellites.map(({ tle, ...s }) => ({
+        ...s,
+        meanMotion: tle[0] ? parseFloat(tle[0].line2.substring(52, 63)) : null,
+      })),
       pagination: { total, skip, take: satellites.length },
     }
   }

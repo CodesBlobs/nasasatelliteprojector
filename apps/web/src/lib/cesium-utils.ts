@@ -35,6 +35,16 @@ export function eciToEcefMeters(position: Vec3, date: Date): [number, number, nu
   ]
 }
 
+// Geocentric lat/lon from ECI position (accurate enough for display)
+export function eciToLatLon(pos: Vec3, date: Date): { lat: number; lon: number } {
+  const [x, y, z] = eciToEcefMeters(pos, date)
+  const R = Math.sqrt(x * x + y * y + z * z)
+  return {
+    lat: Math.asin(z / R) * (180 / Math.PI),
+    lon: Math.atan2(y, x) * (180 / Math.PI),
+  }
+}
+
 export function altitudeKm(position: Vec3): number {
   return Math.sqrt(position.x ** 2 + position.y ** 2 + position.z ** 2) - 6371
 }

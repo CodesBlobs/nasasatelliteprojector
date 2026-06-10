@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useLayoutEffect } from 'react'
+import { useCallback, useEffect, useRef, useLayoutEffect, memo } from 'react'
 import * as Cesium from 'cesium'
 import { eciToEcefMeters } from '@/lib/cesium-utils'
 import { SEVERITY_COLORS, type Severity } from '@/lib/severity'
@@ -19,7 +19,6 @@ export interface ConjunctionVisual {
   aNoradId: number
   bNoradId: number
   closestApproachKm: number
-  // ECEF meters; null until the predicted approach point has been propagated
   approachPoint: { x: number; y: number; z: number } | null
 }
 
@@ -28,20 +27,26 @@ interface Props {
   positions: Map<number, SatellitePosition>
   orbitPoints: Array<{ timestamp: string; position: { x: number; y: number; z: number } }> | null
   selectedNoradId: number | null
+  nearbyNoradIds: Set<number>
   conjunctions: ConjunctionVisual[]
   severityBySat: Map<number, Severity>
   selectedConjunctionId: string | null
   onSelectSatellite: (noradId: number) => void
   onSelectConjunction: (id: string) => void
+  onReady?: (controls: { resetView: () => void }) => void
 }
 
+// Module-level constants — never re-allocated
 const COLOR_PAYLOAD = Cesium.Color.fromCssColorString('#22d3ee')
 const COLOR_ROCKET = Cesium.Color.fromCssColorString('#f97316')
 const COLOR_DEBRIS = Cesium.Color.fromCssColorString('#94a3b8')
 const COLOR_SELECTED = Cesium.Color.fromCssColorString('#e8f400')
+const COLOR_NEARBY = Cesium.Color.fromCssColorString('#ffffff').withAlpha(0.6)
 const POINT_SIZE = 3
 const POINT_SIZE_SELECTED = 8
 const POINT_SIZE_AT_RISK = 6
+const POINT_SIZE_NEARBY = 5
+const MAX_CONJUNCTIONS = 50
 
 const SEVERITY_CESIUM_COLORS = Object.fromEntries(
   Object.entries(SEVERITY_COLORS).map(([level, css]) => [
@@ -59,24 +64,34 @@ function pointColor(objectType: string): Cesium.Color {
   return COLOR_PAYLOAD
 }
 
+// Accepts optional result to allow Cartesian3 reuse across calls
 function toCesiumCartesian(
   position: { x: number; y: number; z: number },
   timestamp: string,
+  result?: Cesium.Cartesian3,
 ): Cesium.Cartesian3 {
   const [x, y, z] = eciToEcefMeters(position, new Date(timestamp))
+  if (result) {
+    result.x = x
+    result.y = y
+    result.z = z
+    return result
+  }
   return new Cesium.Cartesian3(x, y, z)
 }
 
-export function CesiumContainer({
+export const CesiumContainer = memo(function CesiumContainer({
   satellites,
   positions,
   orbitPoints,
   selectedNoradId,
+  nearbyNoradIds,
   conjunctions,
   severityBySat,
   selectedConjunctionId,
   onSelectSatellite,
   onSelectConjunction,
+  onReady,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<Cesium.Viewer | null>(null)
@@ -86,34 +101,34 @@ export function CesiumContainer({
   const conjunctionEntitiesRef = useRef<Cesium.Entity[]>([])
   const handlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null)
   const satTypeMap = useRef<Map<number, string>>(new Map())
+  // Live position state for the rAF animation loop — updated from API, read every frame
+  const livePositionsRef = useRef<Map<number, {
+    pos: { x: number; y: number; z: number }
+    vel: { x: number; y: number; z: number }
+    t: number
+  }>>(new Map())
 
   useEffect(() => {
     satTypeMap.current = new Map(satellites.map((s) => [s.noradId, s.objectType]))
   }, [satellites])
 
-  // Initialize viewer once
   useLayoutEffect(() => {
     if (!containerRef.current) return
 
-      ;(window as Window & { CESIUM_BASE_URL?: string }).CESIUM_BASE_URL = '/cesium/'
-      // CSS Chain resolves 0x0 at start so i have to fucking resize it
-      const aside = document.querySelector('aside')
-      const header = document.querySelector('header')
-      const sidebarW = aside?.offsetWidth ?? 256
-      const headerH = header?.offsetHeight ?? 0
-      containerRef.current.style.width = (window.innerWidth - sidebarW) + 'px'
-      containerRef.current.style.height = (window.innerHeight - headerH) + 'px'
+    ;(window as Window & { CESIUM_BASE_URL?: string }).CESIUM_BASE_URL = '/cesium/'
 
+    // CSS flex chain resolves to 0×0 at init — measure directly from the DOM
+    const aside = document.querySelector('aside')
+    const header = document.querySelector('header')
+    const sidebarW = aside?.offsetWidth ?? 256
+    const headerH = header?.offsetHeight ?? 0
+    containerRef.current.style.width = (window.innerWidth - sidebarW) + 'px'
+    containerRef.current.style.height = (window.innerHeight - headerH) + 'px'
 
-    // UrlTemplateImageryProvider is synchronous — avoids silent async failures.
-    // {reverseY} flips the Y axis to match TMS geodetic tile coordinates.
     const imageryProvider = new Cesium.UrlTemplateImageryProvider({
-      url: '/cesium/Assets/Textures/NaturalEarthII/{z}/{x}/{reverseY}.jpg',
-      tilingScheme: new Cesium.GeographicTilingScheme(),
-      tileWidth: 256,
-      tileHeight: 256,
-      minimumLevel: 0,
-      maximumLevel: 2,
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      tilingScheme: new Cesium.WebMercatorTilingScheme(),
+      maximumLevel: 10,
     })
 
     const viewer = new Cesium.Viewer(containerRef.current, {
@@ -129,19 +144,52 @@ export function CesiumContainer({
       timeline: false,
       navigationHelpButton: false,
       baseLayer: new Cesium.ImageryLayer(imageryProvider),
+      // Only re-render when explicitly requested — biggest single perf win
+      requestRenderMode: true,
+      maximumRenderTimeChange: Infinity,
+      useBrowserRecommendedResolution: false,
+      // Disable MSAA — not worth the cost for point primitives
+      msaaSamples: 1,
+      // Disable translucency sorting — not needed for our scene
+      orderIndependentTranslucency: false,
+      // Saves ~15% GPU memory; we never need alpha in the backbuffer
+      contextOptions: {
+        webgl: {
+          alpha: false,
+          antialias: false,
+          preserveDrawingBuffer: false,
+          powerPreference: 'high-performance' as WebGLPowerPreference,
+          stencil: false,
+          depth: true,
+        },
+      },
+      scene3DOnly: true,
     })
 
-    viewer.scene.globe.enableLighting = true
-    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
-    viewer.scene.backgroundColor = Cesium.Color.BLACK
-    viewer.scene.globe.atmosphereLightIntensity = 20.0
+    // Globe settings
+    // Render at 1.5× max on retina — 44% fewer pixels vs native 2×
+    viewer.resolutionScale = Math.min(window.devicePixelRatio, 1.5)
 
-    // Use PointPrimitiveCollection for performance (100–500 satellites)
+    viewer.scene.globe.enableLighting = false
+    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false
+    viewer.scene.globe.showGroundAtmosphere = false
+    viewer.scene.backgroundColor = Cesium.Color.BLACK
+    // Coarser LOD — at orbital altitude tile detail barely matters
+    viewer.scene.globe.maximumScreenSpaceError = 24
+    viewer.scene.globe.tileCacheSize = 300
+    viewer.scene.fog.enabled = false
+
+    viewer.imageryLayers.addImageryProvider(
+      new Cesium.UrlTemplateImageryProvider({
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+        tilingScheme: new Cesium.WebMercatorTilingScheme(),
+        maximumLevel: 10,
+      }),
+    )
+
     const collection = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection())
     collectionRef.current = collection
 
-    // Click-to-select: satellites are point primitives with numeric ids,
-    // conjunction lines/markers are entities with prefixed string ids
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
     handler.setInputAction(
       (click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
@@ -149,8 +197,13 @@ export function CesiumContainer({
         if (!Cesium.defined(picked)) return
         if (typeof picked.id === 'number') {
           onSelectRef.current(picked.id as number)
-        } else if (picked.id instanceof Cesium.Entity && picked.id.id.startsWith(CONJUNCTION_ENTITY_PREFIX)) {
-          const conjunctionId = picked.id.id.slice(CONJUNCTION_ENTITY_PREFIX.length).replace(/:(line|marker)$/, '')
+        } else if (
+          picked.id instanceof Cesium.Entity &&
+          picked.id.id.startsWith(CONJUNCTION_ENTITY_PREFIX)
+        ) {
+          const conjunctionId = picked.id.id
+            .slice(CONJUNCTION_ENTITY_PREFIX.length)
+            .replace(/:(line|marker)$/, '')
           onSelectConjunctionRef.current(conjunctionId)
         }
       },
@@ -159,22 +212,69 @@ export function CesiumContainer({
     handlerRef.current = handler
     viewerRef.current = viewer
 
+    onReady?.({
+      resetView: () => {
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(0, 20, 22_000_000),
+          orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
+          duration: 1.5,
+        })
+      },
+    })
+
     const resizeObserver = new ResizeObserver(() => {
       if (viewer.isDestroyed()) return
       viewer.resize()
       viewer.scene.requestRender()
-
     })
     resizeObserver.observe(containerRef.current)
 
     setTimeout(() => {
       if (viewer.isDestroyed()) return
-        viewer.resize()
-        viewer.scene.requestRender()
-    
+      viewer.resize()
+      viewer.scene.requestRender()
     }, 0)
 
+    // Smooth animation loop — extrapolates each satellite's position every frame
+    // using pos + vel × dt. GMST is computed once per frame for all satellites.
+    const animScratch = new Cesium.Cartesian3()
+    let animId: number
+    function animate() {
+      if (viewer.isDestroyed()) return
+      const nowMs = Date.now()
+      const jd = nowMs / 86400000.0 + 2440587.5
+      const T = (jd - 2451545.0) / 36525.0
+      const deg =
+        280.46061837 +
+        360.98564736629 * (jd - 2451545.0) +
+        0.000387933 * T * T -
+        (T * T * T) / 38710000.0
+      const gmst = (((deg % 360) + 360) % 360) * (Math.PI / 180)
+      const cosG = Math.cos(gmst)
+      const sinG = Math.sin(gmst)
+
+      let dirty = false
+      livePositionsRef.current.forEach(({ pos, vel, t }, noradId) => {
+        const point = pointsMapRef.current.get(noradId)
+        if (!point) return
+        const dt = (nowMs - t) / 1000
+        const ex = pos.x + vel.x * dt
+        const ey = pos.y + vel.y * dt
+        const ez = pos.z + vel.z * dt
+        animScratch.x = (ex * cosG + ey * sinG) * 1000
+        animScratch.y = (-ex * sinG + ey * cosG) * 1000
+        animScratch.z = ez * 1000
+        point.position = animScratch
+        dirty = true
+      })
+
+      if (dirty) viewer.scene.requestRender()
+      animId = requestAnimationFrame(animate)
+    }
+    animId = requestAnimationFrame(animate)
+
     return () => {
+      cancelAnimationFrame(animId)
       resizeObserver.disconnect()
       handler.destroy()
       viewer.destroy()
@@ -182,45 +282,48 @@ export function CesiumContainer({
       collectionRef.current = null
       handlerRef.current = null
       pointsMapRef.current.clear()
+      livePositionsRef.current.clear()
       conjunctionEntitiesRef.current = []
       orbitEntityRef.current = null
-
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Keep click handlers current without re-init
   const onSelectRef = useRef(onSelectSatellite)
   onSelectRef.current = onSelectSatellite
   const onSelectConjunctionRef = useRef(onSelectConjunction)
   onSelectConjunctionRef.current = onSelectConjunction
 
-  // Selection wins over risk, risk wins over object-type color
   const stylePoint = useCallback(
     (point: Cesium.PointPrimitive, noradId: number) => {
       const isSelected = noradId === selectedNoradId
+      const isNearby = nearbyNoradIds.has(noradId)
       const severity = severityBySat.get(noradId)
       point.color = isSelected
         ? COLOR_SELECTED
         : severity
           ? SEVERITY_CESIUM_COLORS[severity]
-          : pointColor(satTypeMap.current.get(noradId) ?? '')
+          : isNearby
+            ? COLOR_NEARBY
+            : pointColor(satTypeMap.current.get(noradId) ?? '')
       point.pixelSize = isSelected
         ? POINT_SIZE_SELECTED
         : severity
           ? POINT_SIZE_AT_RISK
-          : POINT_SIZE
+          : isNearby
+            ? POINT_SIZE_NEARBY
+            : POINT_SIZE
     },
-    [selectedNoradId, severityBySat],
+    [selectedNoradId, severityBySat, nearbyNoradIds],
   )
 
-  // Update satellite point primitives when positions change
+  // Sync API position data → livePositionsRef (animation loop reads this every frame)
+  // Also handles adding/removing points from the Cesium collection.
   useEffect(() => {
     const collection = collectionRef.current
     const viewer = viewerRef.current
     if (!collection || !viewer || positions.size === 0) return
 
-    // Remove points no longer in the visible set
     const toRemove: number[] = []
     pointsMapRef.current.forEach((_, noradId) => {
       if (!positions.has(noradId)) toRemove.push(noradId)
@@ -228,21 +331,24 @@ export function CesiumContainer({
     toRemove.forEach((noradId) => {
       collection.remove(pointsMapRef.current.get(noradId)!)
       pointsMapRef.current.delete(noradId)
+      livePositionsRef.current.delete(noradId)
     })
 
     positions.forEach((pos, noradId) => {
-      const cesiumPos = toCesiumCartesian(pos.position, pos.timestamp)
+      // Feed the animation loop with fresh reference data
+      livePositionsRef.current.set(noradId, {
+        pos: pos.position,
+        vel: pos.velocity,
+        t: new Date(pos.timestamp).getTime(),
+      })
 
       if (pointsMapRef.current.has(noradId)) {
-        const point = pointsMapRef.current.get(noradId)!
-        point.position = cesiumPos
-        stylePoint(point, noradId)
+        stylePoint(pointsMapRef.current.get(noradId)!, noradId)
       } else {
+        // Initial placement — animation loop takes over immediately after
         const point = collection.add({
-          position: cesiumPos,
+          position: toCesiumCartesian(pos.position, pos.timestamp),
           id: noradId,
-          outlineColor: Cesium.Color.WHITE.withAlpha(0.3),
-          outlineWidth: 1,
         })
         stylePoint(point, noradId)
         pointsMapRef.current.set(noradId, point)
@@ -252,13 +358,11 @@ export function CesiumContainer({
     viewer.scene.requestRender()
   }, [positions, stylePoint])
 
-  // Update selection highlight when selectedNoradId changes without position change
+  // Restyle all points when selection or severity changes
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer) return
-
     pointsMapRef.current.forEach((point, noradId) => stylePoint(point, noradId))
-
     viewer.scene.requestRender()
   }, [stylePoint])
 
@@ -266,7 +370,6 @@ export function CesiumContainer({
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer || selectedNoradId === null) return
-
     const point = pointsMapRef.current.get(selectedNoradId)
     if (point) {
       viewer.camera.flyToBoundingSphere(
@@ -276,7 +379,7 @@ export function CesiumContainer({
     }
   }, [selectedNoradId])
 
-  // Render conjunction warning lines and predicted approach markers
+  // Conjunction lines and approach markers — cap at MAX_CONJUNCTIONS
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer) return
@@ -284,7 +387,7 @@ export function CesiumContainer({
     conjunctionEntitiesRef.current.forEach((e) => viewer.entities.remove(e))
     conjunctionEntitiesRef.current = []
 
-    for (const conj of conjunctions) {
+    for (const conj of conjunctions.slice(0, MAX_CONJUNCTIONS)) {
       const isSelected = conj.id === selectedConjunctionId
       const color = SEVERITY_CESIUM_COLORS[conj.riskLevel]
       const posA = positions.get(conj.aNoradId)
@@ -323,7 +426,10 @@ export function CesiumContainer({
             outlineWidth: 2,
           },
           label: {
-            text: `${conj.closestApproachKm < 1 ? `${(conj.closestApproachKm * 1000).toFixed(0)} m` : `${conj.closestApproachKm.toFixed(2)} km`}`,
+            text:
+              conj.closestApproachKm < 1
+                ? `${(conj.closestApproachKm * 1000).toFixed(0)} m`
+                : `${conj.closestApproachKm.toFixed(2)} km`,
             font: '11px monospace',
             fillColor: color,
             showBackground: true,
@@ -339,8 +445,7 @@ export function CesiumContainer({
     viewer.scene.requestRender()
   }, [conjunctions, positions, selectedConjunctionId])
 
-  // Fly to selected conjunction's predicted approach point (once per selection,
-  // deferred until the approach point has been propagated)
+  // Fly to selected conjunction approach point (once per selection)
   const flownConjunctionRef = useRef<string | null>(null)
   useEffect(() => {
     const viewer = viewerRef.current
@@ -349,21 +454,23 @@ export function CesiumContainer({
       return
     }
     if (flownConjunctionRef.current === selectedConjunctionId) return
-
     const conj = conjunctions.find((c) => c.id === selectedConjunctionId)
     if (!conj?.approachPoint) return
-
     flownConjunctionRef.current = selectedConjunctionId
     viewer.camera.flyToBoundingSphere(
       new Cesium.BoundingSphere(
-        new Cesium.Cartesian3(conj.approachPoint.x, conj.approachPoint.y, conj.approachPoint.z),
+        new Cesium.Cartesian3(
+          conj.approachPoint.x,
+          conj.approachPoint.y,
+          conj.approachPoint.z,
+        ),
         2_000_000,
       ),
       { duration: 1.5 },
     )
   }, [selectedConjunctionId, conjunctions])
 
-  // Update orbit track for selected satellite
+  // Orbit track
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer) return
@@ -383,10 +490,9 @@ export function CesiumContainer({
         polyline: {
           positions: ecefPositions,
           width: 1.5,
-          material: new Cesium.PolylineGlowMaterialProperty({
-            glowPower: 0.15,
-            color: Cesium.Color.fromCssColorString('#22d3ee').withAlpha(0.6),
-          }),
+          material: new Cesium.ColorMaterialProperty(
+            Cesium.Color.fromCssColorString('#22d3ee').withAlpha(0.5),
+          ),
           clampToGround: false,
         },
       })
@@ -402,4 +508,6 @@ export function CesiumContainer({
       style={{ background: '#000' }}
     />
   )
-}
+})
+
+CesiumContainer.displayName = 'CesiumContainer'

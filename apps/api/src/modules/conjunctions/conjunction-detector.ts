@@ -5,8 +5,20 @@ import type { Position, Velocity } from '@orbital/shared'
 export interface TrackedObject {
   satelliteId: string
   noradId: number
+  name: string
   line1: string
   line2: string
+}
+
+function isSpaceStation(name: string): boolean {
+  const n = name.toUpperCase()
+  return (
+    /^ISS[\s(]|^ISS$/.test(n) ||
+    /TIANGONG|TIANHE|SHENZHOU/.test(n) ||
+    /^CSS[\s(]/.test(n) ||
+    /\bZARYA\b|\bZVEZDA\b|\bNAUKA\b|\bPIRS\b|\bRASSVET\b|\bPRICHAL\b/.test(n) ||
+    /\bUNITY\b|\bHARMONY\b|\bTRANQUILITY\b|\bSERENITY\b|\bDESTINY\b|\bCUPOLA\b/.test(n)
+  )
 }
 
 export interface CloseApproach {
@@ -21,12 +33,17 @@ export interface DetectionOptions {
   windowHours: number
   sampleMinutes: number
   thresholdKm: number
+  minimumThresholdKm: number
 }
 
 export const DEFAULT_DETECTION_OPTIONS: DetectionOptions = {
   windowHours: 24,
   sampleMinutes: 5,
   thresholdKm: 10,
+  // Pairs below this are co-located structures (docked ISS modules, formation
+  // flyers) — not real conjunction threats. Physically separate objects in
+  // crossing orbits will always register > ~0.1 km at 5-min sampling.
+  minimumThresholdKm: 0.1,
 }
 
 interface StateVector {
@@ -71,7 +88,7 @@ export function findCloseApproaches(
   startTime: Date,
   options: DetectionOptions = DEFAULT_DETECTION_OPTIONS,
 ): CloseApproach[] {
-  const { windowHours, sampleMinutes, thresholdKm } = options
+  const { windowHours, sampleMinutes, thresholdKm, minimumThresholdKm } = options
   const stepMs = sampleMinutes * 60 * 1000
   const stepCount = Math.floor((windowHours * 60) / sampleMinutes) + 1
 
@@ -97,6 +114,9 @@ export function findCloseApproaches(
 
   for (let i = 0; i < objects.length; i++) {
     for (let j = i + 1; j < objects.length; j++) {
+      // Two stations are always co-located or docked — never a real collision threat
+      if (isSpaceStation(objects[i].name) && isSpaceStation(objects[j].name)) continue
+
       let minDistance = Infinity
       let minStep = -1
 
@@ -112,7 +132,7 @@ export function findCloseApproaches(
         }
       }
 
-      if (minStep >= 0 && minDistance < thresholdKm) {
+      if (minStep >= 0 && minDistance >= minimumThresholdKm && minDistance < thresholdKm) {
         const a = states[i][minStep]!
         const b = states[j][minStep]!
         approaches.push({

@@ -1,25 +1,29 @@
 'use client'
 
+import { memo, useEffect, useState } from 'react'
 import { SEVERITY_COLORS, formatCountdown, type Severity } from '@/lib/severity'
 import type { Conjunction } from './GlobeView'
 
 interface Props {
   conjunctions: Conjunction[]
   selectedId: string | null
-  now: Date
   isScanning: boolean
   onSelect: (id: string) => void
   onScan: () => void
 }
 
-export function CollisionPanel({
+export const CollisionPanel = memo(function CollisionPanel({
   conjunctions,
   selectedId,
-  now,
   isScanning,
   onSelect,
   onScan,
 }: Props) {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(id)
+  }, [])
   return (
     <div className="bg-slate-900/90 border border-slate-700 rounded-lg backdrop-blur-sm w-72 flex flex-col overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700/70">
@@ -87,7 +91,7 @@ export function CollisionPanel({
       )}
     </div>
   )
-}
+})
 
 function SeverityBadge({ severity }: { severity: Severity }) {
   const color = SEVERITY_COLORS[severity]

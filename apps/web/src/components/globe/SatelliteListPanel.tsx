@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { memo, useMemo } from 'react'
 import type { Satellite } from './GlobeView'
 import type { SatellitePosition } from './CesiumContainer'
 import { altitudeKm } from '@/lib/cesium-utils'
@@ -9,18 +9,18 @@ interface Props {
   satellites: Satellite[]
   positions: Map<number, SatellitePosition>
   selectedNoradId: number | null
+  search: string
+  onSearchChange: (value: string) => void
   onSelect: (noradId: number) => void
 }
 
 const TYPE_DOT: Record<string, string> = {
-  Payload: 'bg-cyan-400',
-  Debris: 'bg-red-400',
-  'Rocket Body': 'bg-yellow-400',
+  PAYLOAD: 'bg-cyan-400',
+  DEBRIS: 'bg-red-400',
+  'ROCKET BODY': 'bg-yellow-400',
 }
 
-export function SatelliteListPanel({ satellites, positions, selectedNoradId, onSelect }: Props) {
-  const [search, setSearch] = useState('')
-
+export const SatelliteListPanel = memo(function SatelliteListPanel({ satellites, positions, selectedNoradId, search, onSearchChange, onSelect }: Props) {
   const filtered = useMemo(() => {
     if (!search.trim()) return satellites
     const q = search.toLowerCase()
@@ -39,7 +39,7 @@ export function SatelliteListPanel({ satellites, positions, selectedNoradId, onS
           type="search"
           placeholder="Search…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => onSearchChange(e.target.value)}
           className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-cyan-500 placeholder-slate-500"
         />
       </div>
@@ -65,7 +65,7 @@ export function SatelliteListPanel({ satellites, positions, selectedNoradId, onS
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                  TYPE_DOT[sat.objectType] ?? 'bg-slate-400'
+                  TYPE_DOT[(sat.objectType ?? '').toUpperCase()] ?? 'bg-slate-400'
                 }`}
               />
               <span className="flex-1 min-w-0">
@@ -87,4 +87,4 @@ export function SatelliteListPanel({ satellites, positions, selectedNoradId, onS
       </div>
     </div>
   )
-}
+})
