@@ -1,6 +1,11 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { PrismaService } from '../../common/prisma/prisma.service'
-import { propagateSatellite, propagateMultiple } from '@orbital/core'
+import {
+  createSatrec,
+  propagateSatrec,
+  propagateSatrecMultiple,
+  type Satrec,
+} from '@orbital/core'
 import { SatelliteNotFoundException } from './exceptions/satellite-not-found.exception'
 import { PropagationFailedException } from './exceptions/propagation-failed.exception'
 import type { PropagatedPosition, OrbitTrack } from './interfaces/propagated-position.interface'
@@ -8,13 +13,18 @@ import type { PropagatedPosition, OrbitTrack } from './interfaces/propagated-pos
 const ORBIT_POINTS = 100
 const ORBIT_DURATION_MINUTES = 90
 const ORBIT_INTERVAL_SECONDS = (ORBIT_DURATION_MINUTES * 60) / ORBIT_POINTS
-// Refresh the in-memory TLE cache every 30 minutes
 const TLE_CACHE_TTL_MS = 30 * 60 * 1000
+
+interface TleCacheEntry {
+  line1: string
+  line2: string
+  satrec: Satrec
+}
 
 @Injectable()
 export class PropagationService implements OnModuleInit {
   private readonly logger = new Logger(PropagationService.name)
-  private tleCache = new Map<number, { line1: string; line2: string }>()
+  private tleCache = new Map<number, TleCacheEntry>()
   private tleCacheLoadedAt = 0
 
   constructor(private prisma: PrismaService) {}
@@ -26,7 +36,7 @@ export class PropagationService implements OnModuleInit {
   private async loadTleCache(): Promise<void> {
     const PAGE = 5000
     let skip = 0
-    const next = new Map<number, { line1: string; line2: string }>()
+    const next = new Map<number, TleCacheEntry>()
     for (;;) {
       const rows = await this.prisma.satellite.findMany({
         skip,
@@ -34,7 +44,14 @@ export class PropagationService implements OnModuleInit {
         include: { tle: { orderBy: { epoch: 'desc' }, take: 1, select: { line1: true, line2: true } } },
       })
       for (const sat of rows) {
-        if (sat.tle[0]) next.set(sat.noradId, { line1: sat.tle[0].line1, line2: sat.tle[0].line2 })
+        const tle = sat.tle[0]
+        if (!tle) continue
+        try {
+          const satrec = createSatrec(tle.line1, tle.line2)
+          next.set(sat.noradId, { line1: tle.line1, line2: tle.line2, satrec })
+        } catch {
+          // skip satellites with invalid TLEs
+        }
       }
       skip += PAGE
       if (rows.length < PAGE) break
@@ -51,43 +68,38 @@ export class PropagationService implements OnModuleInit {
   }
 
   async getPosition(noradId: number, timestamp?: Date): Promise<PropagatedPosition> {
-    const { satellite, tle } = await this.fetchSatelliteWithTle(noradId)
-    const at = timestamp ?? new Date()
+    await this.ensureCache()
+    const entry = this.tleCache.get(noradId)
+    if (!entry) throw new SatelliteNotFoundException(noradId)
 
-    let result
+    const at = timestamp ?? new Date()
     try {
-      result = propagateSatellite(tle.line1, tle.line2, at)
+      const result = propagateSatrec(entry.satrec, at)
+      return { noradId, timestamp: at.toISOString(), position: result.position, velocity: result.velocity }
     } catch (err) {
       throw new PropagationFailedException(err instanceof Error ? err.message : String(err))
-    }
-
-    return {
-      noradId: satellite.noradId,
-      timestamp: at.toISOString(),
-      position: result.position,
-      velocity: result.velocity,
     }
   }
 
   async getOrbit(noradId: number, startTime?: Date): Promise<OrbitTrack> {
-    const { satellite, tle } = await this.fetchSatelliteWithTle(noradId)
-    const now = startTime ?? new Date()
+    await this.ensureCache()
+    const entry = this.tleCache.get(noradId)
+    if (!entry) throw new SatelliteNotFoundException(noradId)
 
-    let points
+    const now = startTime ?? new Date()
     try {
-      points = propagateMultiple(tle.line1, tle.line2, now, ORBIT_INTERVAL_SECONDS, ORBIT_POINTS)
+      const points = propagateSatrecMultiple(entry.satrec, now, ORBIT_INTERVAL_SECONDS, ORBIT_POINTS)
+      return {
+        noradId,
+        generatedAt: now.toISOString(),
+        points: points.map((p) => ({
+          timestamp: p.timestamp.toISOString(),
+          position: p.position,
+          velocity: p.velocity,
+        })),
+      }
     } catch (err) {
       throw new PropagationFailedException(err instanceof Error ? err.message : String(err))
-    }
-
-    return {
-      noradId: satellite.noradId,
-      generatedAt: now.toISOString(),
-      points: points.map((p) => ({
-        timestamp: p.timestamp.toISOString(),
-        position: p.position,
-        velocity: p.velocity,
-      })),
     }
   }
 
@@ -99,33 +111,15 @@ export class PropagationService implements OnModuleInit {
 
     const results: PropagatedPosition[] = []
     for (const noradId of noradIds) {
-      const tle = this.tleCache.get(noradId)
-      if (!tle) continue
+      const entry = this.tleCache.get(noradId)
+      if (!entry) continue
       try {
-        const result = propagateSatellite(tle.line1, tle.line2, at)
+        const result = propagateSatrec(entry.satrec, at)
         results.push({ noradId, timestamp: ts, position: result.position, velocity: result.velocity })
       } catch {
         // skip decayed / bad TLE
       }
     }
     return results
-  }
-
-  private async fetchSatelliteWithTle(noradId: number) {
-    const satellite = await this.prisma.satellite.findUnique({
-      where: { noradId },
-      include: { tle: { orderBy: { epoch: 'desc' }, take: 1 } },
-    })
-
-    if (!satellite) {
-      throw new SatelliteNotFoundException(noradId)
-    }
-
-    const tle = satellite.tle[0]
-    if (!tle) {
-      throw new PropagationFailedException(`No TLE data available for NORAD ID ${noradId}`)
-    }
-
-    return { satellite, tle }
   }
 }

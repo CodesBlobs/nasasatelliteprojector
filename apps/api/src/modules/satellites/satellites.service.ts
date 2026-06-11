@@ -67,20 +67,30 @@ export class SatellitesService {
   }
 
   async getStats() {
-    const [total, payload, debris, rocketBody, latestTle] = await Promise.all([
-      this.prisma.satellite.count(),
-      this.prisma.satellite.count({ where: { objectType: 'Payload' } }),
-      this.prisma.satellite.count({ where: { objectType: 'Debris' } }),
-      this.prisma.satellite.count({ where: { objectType: 'Rocket Body' } }),
+    const [rows, latestTle] = await Promise.all([
+      this.prisma.$queryRaw<{ objectType: string; _count: bigint }[]>`
+        SELECT "objectType", COUNT(*) AS "_count" FROM "Satellite" GROUP BY "objectType"
+      `,
       this.prisma.tLE.findFirst({
         orderBy: { createdAt: 'desc' },
         select: { createdAt: true },
       }),
     ])
 
+    const byType: Record<string, number> = {}
+    let total = 0
+    for (const row of rows) {
+      byType[row.objectType] = Number(row._count)
+      total += Number(row._count)
+    }
+
     return {
       total,
-      byType: { Payload: payload, Debris: debris, 'Rocket Body': rocketBody },
+      byType: {
+        Payload: byType['Payload'] ?? 0,
+        Debris: byType['Debris'] ?? 0,
+        'Rocket Body': byType['Rocket Body'] ?? 0,
+      },
       lastIngestAt: latestTle?.createdAt ?? null,
     }
   }

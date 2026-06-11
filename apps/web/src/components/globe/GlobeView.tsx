@@ -9,6 +9,10 @@ import { SatelliteListPanel } from './SatelliteListPanel'
 import { SatelliteInfoPanel } from './SatelliteInfoPanel'
 import { TimeControlsBar } from './TimeControlsBar'
 import { CollisionPanel } from './CollisionPanel'
+import ManeuverPanel from '@/components/ManeuverPanel'
+import SimulationResults from '@/components/SimulationResults'
+import OrbitComparison from '@/components/OrbitComparison'
+import type { SimulationWithResult } from '@orbital/shared'
 
 export interface Satellite {
   id: string
@@ -93,6 +97,7 @@ const RENDER_PRESETS = [100, 500, 1000, 2500, 5000, 10000, 15000]
 
 export default function GlobeView() {
   const [satellites, setSatellites] = useState<Satellite[]>([])
+  const [catalogueLoaded, setCatalogueLoaded] = useState(false)
   const [positions, setPositions] = useState<Map<number, SatellitePosition>>(new Map())
   const [selectedNoradId, setSelectedNoradId] = useState<number | null>(null)
   const [orbitTrack, setOrbitTrack] = useState<OrbitPoint[] | null>(null)
@@ -100,11 +105,44 @@ export default function GlobeView() {
   const [selectedConjunctionId, setSelectedConjunctionId] = useState<string | null>(null)
   const [approachPoints, setApproachPoints] = useState<Map<string, { x: number; y: number; z: number }>>(new Map())
   const [isScanning, setIsScanning] = useState(false)
+  const [isIngesting, setIsIngesting] = useState(false)
   const [search, setSearch] = useState('')
   const [backgroundCount, setBackgroundCount] = useState(500)
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all')
   const [orbitFilter, setOrbitFilter] = useState<OrbitFilter>('all')
   const resetViewRef = useRef<(() => void) | null>(null)
+
+  const [resolutionScale, setResolutionScale] = useState(1.0)
+
+  // Maneuver simulation state
+  const [showManeuverPanel, setShowManeuverPanel] = useState(false)
+  const [simulationResult, setSimulationResult] = useState<SimulationWithResult | null>(null)
+  const [simulatedOrbitTrack, setSimulatedOrbitTrack] = useState<OrbitPoint[] | null>(null)
+  const [showOriginalOrbit, setShowOriginalOrbit] = useState(true)
+  const [showSimulatedOrbit, setShowSimulatedOrbit] = useState(true)
+
+  const handleSimulationComplete = useCallback((result: SimulationWithResult) => {
+    setSimulationResult(result)
+    if (result.result?.simulatedTrajectory) {
+      setSimulatedOrbitTrack(result.result.simulatedTrajectory as unknown as OrbitPoint[])
+    }
+    setShowManeuverPanel(false)
+    setShowOriginalOrbit(true)
+    setShowSimulatedOrbit(true)
+  }, [])
+
+  const handleClearSimulation = useCallback(() => {
+    setSimulationResult(null)
+    setSimulatedOrbitTrack(null)
+  }, [])
+
+  // Reset simulation when satellite selection changes
+  const handleSelectSatelliteWithReset = useCallback((noradId: number) => {
+    setSelectedNoradId((prev) => (prev === noradId ? null : noradId))
+    setShowManeuverPanel(false)
+    setSimulationResult(null)
+    setSimulatedOrbitTrack(null)
+  }, [])
 
   const [simulatedTime, setSimulatedTime] = useState(() => new Date())
   const [isPlaying, setIsPlaying] = useState(true)
@@ -248,22 +286,33 @@ export default function GlobeView() {
 
     async function loadAll() {
       const PAGE = 1000
-      let skip = 0
-      let total = Infinity
-      const all: Satellite[] = []
-      while (all.length < total) {
-        const data = await fetchWithRetry(skip, PAGE)
+
+      const first = await fetchWithRetry(0, PAGE)
+      if (cancelled) return
+      const total = first.pagination.total
+      const all: Satellite[] = [...first.data]
+      setSatellites([...all])
+
+      const remainingPages = Math.ceil((total - first.data.length) / PAGE)
+      if (remainingPages > 0) {
+        const pages = await Promise.all(
+          Array.from({ length: remainingPages }, (_, i) =>
+            fetchWithRetry((i + 1) * PAGE, PAGE),
+          ),
+        )
         if (cancelled) return
-        total = data.pagination.total
-        all.push(...data.data)
+        for (const page of pages) all.push(...page.data)
         setSatellites([...all])
-        if (data.data.length < PAGE) break
-        skip += PAGE
       }
+
+      if (!cancelled) setCatalogueLoaded(true)
     }
 
     loadAll().catch((err) => {
-      if (!cancelled) console.error('Failed to load satellite catalogue:', err)
+      if (!cancelled) {
+        console.error('Failed to load satellite catalogue:', err)
+        setCatalogueLoaded(true)
+      }
     })
     return () => { cancelled = true }
   }, [])
@@ -417,6 +466,20 @@ export default function GlobeView() {
     [conjunctions, approachPoints],
   )
 
+  const handleIngest = useCallback(async () => {
+    setIsIngesting(true)
+    try {
+      await api.ingest.celestrak('active')
+      // Reload catalogue after ingest
+      const first = (await api.satellites.list(0, 1000)) as SatelliteList
+      setSatellites(first.data)
+    } catch (err) {
+      console.error('Ingest failed:', err)
+    } finally {
+      setIsIngesting(false)
+    }
+  }, [])
+
   const handleScan = useCallback(async () => {
     setIsScanning(true)
     try {
@@ -429,9 +492,8 @@ export default function GlobeView() {
     }
   }, [fetchConjunctions])
 
-  const handleSelectSatellite = useCallback((noradId: number) => {
-    setSelectedNoradId((prev) => (prev === noradId ? null : noradId))
-  }, [])
+  // handleSelectSatelliteWithReset defined above; keep a plain alias for panels that don't need reset
+  const handleSelectSatellite = handleSelectSatelliteWithReset
 
   const handleSelectConjunction = useCallback((id: string) => {
     setSelectedConjunctionId((prev) => (prev === id ? null : id))
@@ -453,11 +515,15 @@ export default function GlobeView() {
         satellites={activeSatellites}
         positions={positions}
         orbitPoints={orbitTrack}
+        simulatedOrbitPoints={simulatedOrbitTrack}
+        showOriginalOrbit={showOriginalOrbit}
+        showSimulatedOrbit={showSimulatedOrbit}
         selectedNoradId={selectedNoradId}
         nearbyNoradIds={nearbyNoradIds}
         conjunctions={conjunctionVisuals}
         severityBySat={severityBySat}
         selectedConjunctionId={selectedConjunctionId}
+        resolutionScale={resolutionScale}
         onSelectSatellite={handleSelectSatellite}
         onSelectConjunction={handleSelectConjunction}
         onReady={(controls) => { resetViewRef.current = controls.resetView }}
@@ -475,9 +541,9 @@ export default function GlobeView() {
         />
       </div>
 
-      {/* Selected satellite info — always show once a satellite is selected */}
+      {/* Selected satellite info + maneuver button */}
       {selectedSat && (
-        <div className="absolute bottom-16 left-3 z-10 w-64">
+        <div className="absolute bottom-16 left-3 z-10 w-64 flex flex-col gap-2">
           <SatelliteInfoPanel
             satellite={selectedSat}
             position={selectedPos}
@@ -486,6 +552,49 @@ export default function GlobeView() {
             conjunctions={selectedSatConjunctions}
             lat={selectedLatLon?.lat ?? null}
             lon={selectedLatLon?.lon ?? null}
+          />
+          {!showManeuverPanel && !simulationResult && (
+            <button
+              onClick={() => setShowManeuverPanel(true)}
+              className="w-full bg-slate-900/80 border border-cyan-700 hover:border-cyan-400 text-cyan-400 hover:text-cyan-200 rounded-lg py-1.5 text-xs font-medium transition-colors"
+            >
+              Simulate Maneuver
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Maneuver input panel */}
+      {showManeuverPanel && selectedSat && (
+        <div className="absolute bottom-16 left-3 z-20">
+          <ManeuverPanel
+            satelliteId={selectedSat.id}
+            satelliteName={selectedSat.name}
+            onSimulationComplete={handleSimulationComplete}
+            onClose={() => setShowManeuverPanel(false)}
+          />
+        </div>
+      )}
+
+      {/* Simulation results panel */}
+      {simulationResult?.result && (
+        <div className="absolute bottom-16 left-3 z-20">
+          <SimulationResults
+            simulation={simulationResult}
+            onClose={handleClearSimulation}
+          />
+        </div>
+      )}
+
+      {/* Orbit comparison legend — shown when simulated orbit is loaded */}
+      {simulatedOrbitTrack && (
+        <div className="absolute bottom-3 right-3 z-10">
+          <OrbitComparison
+            showOriginal={showOriginalOrbit}
+            showSimulated={showSimulatedOrbit}
+            onToggleOriginal={() => setShowOriginalOrbit((v) => !v)}
+            onToggleSimulated={() => setShowSimulatedOrbit((v) => !v)}
+            onClear={handleClearSimulation}
           />
         </div>
       )}
@@ -502,28 +611,77 @@ export default function GlobeView() {
         />
       </div>
 
-      {/* Reset view button */}
-      <button
-        onClick={() => resetViewRef.current?.()}
-        className="absolute bottom-16 right-3 z-10 bg-slate-900/80 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white rounded-lg px-3 py-1.5 text-xs transition-colors"
-        title="Reset camera"
-      >
-        ⊕ Reset View
-      </button>
+      {/* Camera controls — bottom right */}
+      <div className="absolute bottom-16 right-3 z-10 flex flex-col gap-1.5">
+        <div className="bg-slate-900/80 border border-slate-700 rounded-lg px-2 py-1.5 flex flex-col gap-1">
+          <span className="text-[10px] text-slate-500 text-center">Resolution</span>
+          <div className="flex gap-1">
+            {([0.25, 0.5, 0.75, 1.0] as const).map((scale) => (
+              <button
+                key={scale}
+                onClick={() => setResolutionScale(scale)}
+                className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                  resolutionScale === scale
+                    ? 'bg-cyan-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title={`Render at ${scale * 100}% resolution`}
+              >
+                {scale === 1.0 ? '1x' : `${scale * 100 | 0}%`}
+              </button>
+            ))}
+            <button
+              onClick={() => setResolutionScale(window.devicePixelRatio)}
+              className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                resolutionScale === window.devicePixelRatio
+                  ? 'bg-cyan-600 text-white'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Full device pixel ratio (sharpest)"
+            >
+              HiDPI
+            </button>
+          </div>
+        </div>
+        <button
+          onClick={() => resetViewRef.current?.()}
+          className="bg-slate-900/80 border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-white rounded-lg px-3 py-1.5 text-xs transition-colors"
+          title="Reset camera"
+        >
+          ⊕ Reset View
+        </button>
+      </div>
 
       {/* Status + render count picker + filters */}
       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1.5">
         <div className="flex items-center gap-2">
           <div className="bg-slate-900/80 border border-slate-700 rounded-full px-3 py-1 text-xs text-slate-400 whitespace-nowrap">
-            {positions.size > 0 ? (
+            {activeSatellites.length > 0 && catalogueLoaded ? (
               <span>
-                <span className="text-cyan-400 font-medium">{positions.size}</span> live
+                <span className="text-cyan-400 font-medium">{activeSatellites.length.toLocaleString()}</span> tracking
+                {positions.size > 0 && positions.size < activeSatellites.length && (
+                  <span className="text-slate-500 ml-1">· {positions.size} live</span>
+                )}
                 {conjunctionNoradIds.size > 0 && (
                   <span className="text-amber-400 ml-2">· {conjunctionNoradIds.size} at risk</span>
                 )}
               </span>
+            ) : catalogueLoaded ? (
+              <span className="text-slate-500">
+                {satellites.length === 0 ? (
+                  <button
+                    onClick={handleIngest}
+                    disabled={isIngesting}
+                    className="text-cyan-400 hover:text-cyan-200 disabled:text-slate-500 transition-colors"
+                  >
+                    {isIngesting ? 'Ingesting satellites…' : '↓ Ingest satellites from CelesTrak'}
+                  </button>
+                ) : (
+                  `${satellites.length.toLocaleString()} loaded — select a render count`
+                )}
+              </span>
             ) : (
-              <span className="text-slate-500">Loading catalogue ({satellites.length} loaded)…</span>
+              <span className="text-slate-500">Loading catalogue ({satellites.length.toLocaleString()} loaded)…</span>
             )}
           </div>
           <div className="bg-slate-900/80 border border-slate-700 rounded-full flex items-center gap-1 px-2 py-1">

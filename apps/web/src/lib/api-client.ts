@@ -66,4 +66,15 @@ export const api = {
         method: 'POST',
       }),
   },
+  simulation: {
+    create: (data: {
+      satelliteId: string
+      deltaV: { x: number; y: number; z: number }
+      windowHours?: number
+      maneuverTime?: string
+    }) => apiCall('/simulation/maneuver', { method: 'POST', body: JSON.stringify(data) }),
+    get: (id: string) => apiCall(`/simulation/${id}`),
+    results: (id: string) => apiCall(`/simulation/${id}/results`),
+    bySatellite: (satelliteId: string) => apiCall(`/simulation/satellite/${satelliteId}`),
+  },
 }

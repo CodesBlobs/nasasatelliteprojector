@@ -26,11 +26,15 @@ interface Props {
   satellites: Satellite[]
   positions: Map<number, SatellitePosition>
   orbitPoints: Array<{ timestamp: string; position: { x: number; y: number; z: number } }> | null
+  simulatedOrbitPoints: Array<{ timestamp: string; position: { x: number; y: number; z: number } }> | null
+  showOriginalOrbit: boolean
+  showSimulatedOrbit: boolean
   selectedNoradId: number | null
   nearbyNoradIds: Set<number>
   conjunctions: ConjunctionVisual[]
   severityBySat: Map<number, Severity>
   selectedConjunctionId: string | null
+  resolutionScale: number
   onSelectSatellite: (noradId: number) => void
   onSelectConjunction: (id: string) => void
   onReady?: (controls: { resetView: () => void }) => void
@@ -42,10 +46,10 @@ const COLOR_ROCKET = Cesium.Color.fromCssColorString('#f97316')
 const COLOR_DEBRIS = Cesium.Color.fromCssColorString('#94a3b8')
 const COLOR_SELECTED = Cesium.Color.fromCssColorString('#e8f400')
 const COLOR_NEARBY = Cesium.Color.fromCssColorString('#ffffff').withAlpha(0.6)
-const POINT_SIZE = 3
-const POINT_SIZE_SELECTED = 8
-const POINT_SIZE_AT_RISK = 6
-const POINT_SIZE_NEARBY = 5
+const POINT_SIZE = 5
+const POINT_SIZE_SELECTED = 10
+const POINT_SIZE_AT_RISK = 8
+const POINT_SIZE_NEARBY = 7
 const MAX_CONJUNCTIONS = 50
 
 const SEVERITY_CESIUM_COLORS = Object.fromEntries(
@@ -84,11 +88,15 @@ export const CesiumContainer = memo(function CesiumContainer({
   satellites,
   positions,
   orbitPoints,
+  simulatedOrbitPoints,
+  showOriginalOrbit,
+  showSimulatedOrbit,
   selectedNoradId,
   nearbyNoradIds,
   conjunctions,
   severityBySat,
   selectedConjunctionId,
+  resolutionScale,
   onSelectSatellite,
   onSelectConjunction,
   onReady,
@@ -98,6 +106,7 @@ export const CesiumContainer = memo(function CesiumContainer({
   const collectionRef = useRef<Cesium.PointPrimitiveCollection | null>(null)
   const pointsMapRef = useRef<Map<number, Cesium.PointPrimitive>>(new Map())
   const orbitEntityRef = useRef<Cesium.Entity | null>(null)
+  const simulatedOrbitEntityRef = useRef<Cesium.Entity | null>(null)
   const conjunctionEntitiesRef = useRef<Cesium.Entity[]>([])
   const handlerRef = useRef<Cesium.ScreenSpaceEventHandler | null>(null)
   const satTypeMap = useRef<Map<number, string>>(new Map())
@@ -128,7 +137,7 @@ export const CesiumContainer = memo(function CesiumContainer({
     const imageryProvider = new Cesium.UrlTemplateImageryProvider({
       url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       tilingScheme: new Cesium.WebMercatorTilingScheme(),
-      maximumLevel: 10,
+      maximumLevel: 19,
     })
 
     const viewer = new Cesium.Viewer(containerRef.current, {
@@ -167,15 +176,16 @@ export const CesiumContainer = memo(function CesiumContainer({
     })
 
     // Globe settings
-    // Render at 1.5× max on retina — 44% fewer pixels vs native 2×
-    viewer.resolutionScale = Math.min(window.devicePixelRatio, 1.5)
+    viewer.resolutionScale = resolutionScale
+    if (viewer.scene.postProcessStages.fxaa) {
+      viewer.scene.postProcessStages.fxaa.enabled = resolutionScale >= 1
+    }
 
     viewer.scene.globe.enableLighting = false
-    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false
-    viewer.scene.globe.showGroundAtmosphere = false
+    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
+    viewer.scene.globe.showGroundAtmosphere = true
     viewer.scene.backgroundColor = Cesium.Color.BLACK
-    // Coarser LOD — at orbital altitude tile detail barely matters
-    viewer.scene.globe.maximumScreenSpaceError = 24
+    viewer.scene.globe.maximumScreenSpaceError = 2
     viewer.scene.globe.tileCacheSize = 300
     viewer.scene.fog.enabled = false
 
@@ -183,7 +193,7 @@ export const CesiumContainer = memo(function CesiumContainer({
       new Cesium.UrlTemplateImageryProvider({
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
         tilingScheme: new Cesium.WebMercatorTilingScheme(),
-        maximumLevel: 10,
+        maximumLevel: 19,
       }),
     )
 
@@ -193,7 +203,7 @@ export const CesiumContainer = memo(function CesiumContainer({
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
     handler.setInputAction(
       (click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
-        const picked = viewer.scene.pick(click.position)
+        const picked = viewer.scene.pick(click.position, 12, 12)
         if (!Cesium.defined(picked)) return
         if (typeof picked.id === 'number') {
           onSelectRef.current(picked.id as number)
@@ -294,6 +304,16 @@ export const CesiumContainer = memo(function CesiumContainer({
   const onSelectConjunctionRef = useRef(onSelectConjunction)
   onSelectConjunctionRef.current = onSelectConjunction
 
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+    viewer.resolutionScale = resolutionScale
+    if (viewer.scene.postProcessStages.fxaa) {
+      viewer.scene.postProcessStages.fxaa.enabled = resolutionScale >= 1
+    }
+    viewer.scene.requestRender()
+  }, [resolutionScale])
+
   const stylePoint = useCallback(
     (point: Cesium.PointPrimitive, noradId: number) => {
       const isSelected = noradId === selectedNoradId
@@ -373,7 +393,7 @@ export const CesiumContainer = memo(function CesiumContainer({
     const point = pointsMapRef.current.get(selectedNoradId)
     if (point) {
       viewer.camera.flyToBoundingSphere(
-        new Cesium.BoundingSphere(point.position, 3_000_000),
+        new Cesium.BoundingSphere(point.position, 500_000),
         { duration: 1.5 },
       )
     }
@@ -470,7 +490,7 @@ export const CesiumContainer = memo(function CesiumContainer({
     )
   }, [selectedConjunctionId, conjunctions])
 
-  // Orbit track
+  // Original orbit track (blue)
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer) return
@@ -480,7 +500,7 @@ export const CesiumContainer = memo(function CesiumContainer({
       orbitEntityRef.current = null
     }
 
-    if (orbitPoints && orbitPoints.length >= 2) {
+    if (showOriginalOrbit && orbitPoints && orbitPoints.length >= 2) {
       const ecefPositions = orbitPoints.map((p) => {
         const [x, y, z] = eciToEcefMeters(p.position, new Date(p.timestamp))
         return new Cesium.Cartesian3(x, y, z)
@@ -489,17 +509,50 @@ export const CesiumContainer = memo(function CesiumContainer({
       orbitEntityRef.current = viewer.entities.add({
         polyline: {
           positions: ecefPositions,
-          width: 1.5,
+          width: 2.5,
           material: new Cesium.ColorMaterialProperty(
-            Cesium.Color.fromCssColorString('#22d3ee').withAlpha(0.5),
+            Cesium.Color.fromCssColorString('#22d3ee').withAlpha(0.75),
           ),
           clampToGround: false,
+          arcType: Cesium.ArcType.NONE,
         },
       })
     }
 
     viewer.scene.requestRender()
-  }, [orbitPoints])
+  }, [orbitPoints, showOriginalOrbit])
+
+  // Simulated orbit track (green)
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+
+    if (simulatedOrbitEntityRef.current) {
+      viewer.entities.remove(simulatedOrbitEntityRef.current)
+      simulatedOrbitEntityRef.current = null
+    }
+
+    if (showSimulatedOrbit && simulatedOrbitPoints && simulatedOrbitPoints.length >= 2) {
+      const ecefPositions = simulatedOrbitPoints.map((p) => {
+        const [x, y, z] = eciToEcefMeters(p.position, new Date(p.timestamp))
+        return new Cesium.Cartesian3(x, y, z)
+      })
+
+      simulatedOrbitEntityRef.current = viewer.entities.add({
+        polyline: {
+          positions: ecefPositions,
+          width: 2.5,
+          material: new Cesium.ColorMaterialProperty(
+            Cesium.Color.fromCssColorString('#4ade80').withAlpha(0.85),
+          ),
+          clampToGround: false,
+          arcType: Cesium.ArcType.NONE,
+        },
+      })
+    }
+
+    viewer.scene.requestRender()
+  }, [simulatedOrbitPoints, showSimulatedOrbit])
 
   return (
     <div

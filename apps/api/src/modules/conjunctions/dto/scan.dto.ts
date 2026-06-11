@@ -22,4 +22,11 @@ export class ScanDto {
   @Min(0.1)
   @Max(100)
   thresholdKm?: number
+
+  @ApiPropertyOptional({ description: 'Minimum miss distance (filters co-located objects)', default: 0.1 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(10)
+  minimumThresholdKm?: number
 }

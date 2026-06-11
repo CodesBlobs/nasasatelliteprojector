@@ -4,7 +4,9 @@ import {
   computeRiskScore,
   distanceKm,
   findCloseApproaches,
+  parseTleOrbitalElements,
   relativeSpeedKmS,
+  type TrackedObject,
 } from './conjunction-detector'
 
 // Real ISS TLE (epoch 2026-06-09) — matches current test runtime window
@@ -14,7 +16,13 @@ const ISS_LINE2 = '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.541790
 const ISS_LINE2_OPPOSITE = '2 25544  51.6416 247.4627 0006703 130.5360 145.0288 15.54179074380645'
 
 const START = new Date('2026-06-09T12:00:00Z')
-const SHORT_SCAN = { windowHours: 1, sampleMinutes: 5, thresholdKm: 10 }
+// minimumThresholdKm:0 so identical-TLE objects (0 km apart) are not filtered out
+const SHORT_SCAN = { windowHours: 1, sampleMinutes: 5, thresholdKm: 10, minimumThresholdKm: 0 }
+
+function makeObj(id: string, noradId: number, line2: string, name = `SAT-${noradId}`): TrackedObject {
+  const { perigeeKm, apogeeKm } = parseTleOrbitalElements(ISS_LINE1, line2)
+  return { satelliteId: id, noradId, name, line1: ISS_LINE1, line2, perigeeKm, apogeeKm }
+}
 
 describe('distanceKm', () => {
   it('computes Euclidean distance between two positions', () => {
@@ -73,12 +81,8 @@ describe('computeRiskScore', () => {
 
 describe('findCloseApproaches', () => {
   it('detects a conjunction for objects on identical orbits', () => {
-    const objects = [
-      { satelliteId: 'sat-a', noradId: 25544, line1: ISS_LINE1, line2: ISS_LINE2 },
-      { satelliteId: 'sat-b', noradId: 90001, line1: ISS_LINE1, line2: ISS_LINE2 },
-    ]
-
-    const approaches = findCloseApproaches(objects, START, SHORT_SCAN)
+    const objects = [makeObj('sat-a', 25544, ISS_LINE2), makeObj('sat-b', 90001, ISS_LINE2)]
+    const { approaches } = findCloseApproaches(objects, START, SHORT_SCAN)
 
     expect(approaches).toHaveLength(1)
     expect(approaches[0].satelliteAId).toBe('sat-a')
@@ -89,37 +93,32 @@ describe('findCloseApproaches', () => {
   })
 
   it('ignores objects that never come within the threshold', () => {
-    const objects = [
-      { satelliteId: 'sat-a', noradId: 25544, line1: ISS_LINE1, line2: ISS_LINE2 },
-      { satelliteId: 'sat-c', noradId: 90002, line1: ISS_LINE1, line2: ISS_LINE2_OPPOSITE },
-    ]
-
-    expect(findCloseApproaches(objects, START, SHORT_SCAN)).toHaveLength(0)
+    const objects = [makeObj('sat-a', 25544, ISS_LINE2), makeObj('sat-c', 90002, ISS_LINE2_OPPOSITE)]
+    const { approaches } = findCloseApproaches(objects, START, SHORT_SCAN)
+    expect(approaches).toHaveLength(0)
   })
 
   it('skips objects whose TLEs fail to propagate', () => {
-    const objects = [
-      { satelliteId: 'sat-a', noradId: 25544, line1: ISS_LINE1, line2: ISS_LINE2 },
-      { satelliteId: 'sat-bad', noradId: 90003, line1: 'garbage', line2: 'garbage' },
-    ]
-
-    expect(findCloseApproaches(objects, START, SHORT_SCAN)).toHaveLength(0)
+    const good = makeObj('sat-a', 25544, ISS_LINE2)
+    const bad: TrackedObject = {
+      satelliteId: 'sat-bad', noradId: 90003, name: 'BAD', line1: 'garbage', line2: 'garbage',
+      perigeeKm: good.perigeeKm, apogeeKm: good.apogeeKm,
+    }
+    const { approaches } = findCloseApproaches([good, bad], START, SHORT_SCAN)
+    expect(approaches).toHaveLength(0)
   })
 
   it('returns results sorted by closest approach distance', () => {
     const objects = [
-      { satelliteId: 'sat-a', noradId: 25544, line1: ISS_LINE1, line2: ISS_LINE2 },
-      { satelliteId: 'sat-b', noradId: 90001, line1: ISS_LINE1, line2: ISS_LINE2 },
-      { satelliteId: 'sat-d', noradId: 90004, line1: ISS_LINE1, line2: ISS_LINE2 },
+      makeObj('sat-a', 25544, ISS_LINE2),
+      makeObj('sat-b', 90001, ISS_LINE2),
+      makeObj('sat-d', 90004, ISS_LINE2),
     ]
-
-    const approaches = findCloseApproaches(objects, START, SHORT_SCAN)
+    const { approaches } = findCloseApproaches(objects, START, SHORT_SCAN)
 
     expect(approaches).toHaveLength(3)
     for (let i = 1; i < approaches.length; i++) {
-      expect(approaches[i].closestApproachKm).toBeGreaterThanOrEqual(
-        approaches[i - 1].closestApproachKm,
-      )
+      expect(approaches[i].closestApproachKm).toBeGreaterThanOrEqual(approaches[i - 1].closestApproachKm)
     }
   })
 })

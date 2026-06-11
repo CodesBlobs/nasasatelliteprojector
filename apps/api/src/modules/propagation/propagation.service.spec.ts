@@ -4,56 +4,34 @@ import { PrismaService } from '../../common/prisma/prisma.service'
 import { SatelliteNotFoundException } from './exceptions/satellite-not-found.exception'
 import { PropagationFailedException } from './exceptions/propagation-failed.exception'
 
-// Real ISS TLE (epoch 2023 day 1)
 const ISS_LINE1 = '1 25544U 98067A   23001.00000000  .00016717  00000-0  29770-3 0  9005'
 const ISS_LINE2 = '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.54179074380645'
 
-const mockSatelliteWithTle = {
-  id: 'sat-1',
-  noradId: 25544,
-  name: 'ISS (ZARYA)',
-  operator: 'NASA',
-  country: 'USA',
-  objectType: 'Payload',
-  createdAt: new Date(),
-  updatedAt: new Date(),
-  tle: [
-    {
-      id: 'tle-1',
-      satelliteId: 'sat-1',
-      line1: ISS_LINE1,
-      line2: ISS_LINE2,
-      epoch: new Date('2023-01-01T00:00:00Z'),
-      createdAt: new Date(),
-    },
-  ],
-}
+// Shape returned by loadTleCache's findMany call
+const cacheSat = { noradId: 25544, tle: [{ line1: ISS_LINE1, line2: ISS_LINE2 }] }
 
 describe('PropagationService', () => {
   let service: PropagationService
-  let prisma: { satellite: { findUnique: ReturnType<typeof vi.fn> } }
+  let prisma: { satellite: { findMany: ReturnType<typeof vi.fn> } }
+
+  const nearEpoch = new Date('2023-01-01T12:00:00Z')
 
   beforeEach(async () => {
-    prisma = {
-      satellite: { findUnique: vi.fn() },
-    }
+    // Default: empty cache — individual tests override as needed
+    prisma = { satellite: { findMany: vi.fn().mockResolvedValue([]) } }
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        PropagationService,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [PropagationService, { provide: PrismaService, useValue: prisma }],
     }).compile()
 
     service = module.get<PropagationService>(PropagationService)
+    // Force cache expiry so ensureCache() triggers loadTleCache() on every test call
+    ;(service as any).tleCacheLoadedAt = 0
   })
-
-  // Fixed timestamp near the TLE epoch (2023-01-01) so SGP4 produces valid results
-  const nearEpoch = new Date('2023-01-01T12:00:00Z')
 
   describe('getPosition', () => {
     it('returns position and velocity for a valid satellite', async () => {
-      prisma.satellite.findUnique.mockResolvedValue(mockSatelliteWithTle)
+      prisma.satellite.findMany.mockResolvedValueOnce([cacheSat])
 
       const result = await service.getPosition(25544, nearEpoch)
 
@@ -68,48 +46,48 @@ describe('PropagationService', () => {
     })
 
     it('propagates to a specific timestamp', async () => {
-      prisma.satellite.findUnique.mockResolvedValue(mockSatelliteWithTle)
-      const at = new Date('2023-01-01T12:00:00Z')
-
-      const result = await service.getPosition(25544, at)
-
-      expect(result.timestamp).toBe(at.toISOString())
-    })
-
-    it('returns non-zero position components for ISS', async () => {
-      prisma.satellite.findUnique.mockResolvedValue(mockSatelliteWithTle)
+      prisma.satellite.findMany.mockResolvedValueOnce([cacheSat])
 
       const result = await service.getPosition(25544, nearEpoch)
 
-      // ISS orbits at ~400 km altitude, so ECI position magnitude should be ~6800 km
+      expect(result.timestamp).toBe(nearEpoch.toISOString())
+    })
+
+    it('returns non-zero position components for ISS', async () => {
+      prisma.satellite.findMany.mockResolvedValueOnce([cacheSat])
+
+      const result = await service.getPosition(25544, nearEpoch)
+
+      // ISS orbits at ~400 km altitude — ECI magnitude should be ~6800 km
       const mag = Math.sqrt(result.position.x ** 2 + result.position.y ** 2 + result.position.z ** 2)
       expect(mag).toBeGreaterThan(6000)
       expect(mag).toBeLessThan(8000)
     })
 
     it('throws SatelliteNotFoundException when satellite not found', async () => {
-      prisma.satellite.findUnique.mockResolvedValue(null)
-
+      // findMany returns [] — noradId 99999 will not be in the cache
       await expect(service.getPosition(99999)).rejects.toThrow(SatelliteNotFoundException)
     })
 
-    it('throws PropagationFailedException when no TLE exists', async () => {
-      prisma.satellite.findUnique.mockResolvedValue({ ...mockSatelliteWithTle, tle: [] })
+    it('throws SatelliteNotFoundException when satellite has no TLE', async () => {
+      prisma.satellite.findMany.mockResolvedValueOnce([{ noradId: 25544, tle: [] }])
 
-      await expect(service.getPosition(25544)).rejects.toThrow(PropagationFailedException)
+      await expect(service.getPosition(25544)).rejects.toThrow(SatelliteNotFoundException)
     })
 
     it('throws PropagationFailedException for malformed TLE lines', async () => {
-      const badTle = { ...mockSatelliteWithTle, tle: [{ ...mockSatelliteWithTle.tle[0], line1: 'bad', line2: 'bad' }] }
-      prisma.satellite.findUnique.mockResolvedValue(badTle)
+      prisma.satellite.findMany.mockResolvedValueOnce([
+        { noradId: 25544, tle: [{ line1: 'bad', line2: 'bad' }] },
+      ])
 
+      // Bad TLE passes twoline2satrec (no error flag) but propagation returns NaN
       await expect(service.getPosition(25544)).rejects.toThrow(PropagationFailedException)
     })
   })
 
   describe('getOrbit', () => {
     it('returns exactly 100 orbit points', async () => {
-      prisma.satellite.findUnique.mockResolvedValue(mockSatelliteWithTle)
+      prisma.satellite.findMany.mockResolvedValueOnce([cacheSat])
 
       const result = await service.getOrbit(25544, nearEpoch)
 
@@ -117,7 +95,7 @@ describe('PropagationService', () => {
     })
 
     it('includes noradId and generatedAt in orbit response', async () => {
-      prisma.satellite.findUnique.mockResolvedValue(mockSatelliteWithTle)
+      prisma.satellite.findMany.mockResolvedValueOnce([cacheSat])
 
       const result = await service.getOrbit(25544, nearEpoch)
 
@@ -126,7 +104,7 @@ describe('PropagationService', () => {
     })
 
     it('each orbit point has timestamp, position, and velocity', async () => {
-      prisma.satellite.findUnique.mockResolvedValue(mockSatelliteWithTle)
+      prisma.satellite.findMany.mockResolvedValueOnce([cacheSat])
 
       const result = await service.getOrbit(25544, nearEpoch)
       const point = result.points[0]
@@ -141,7 +119,7 @@ describe('PropagationService', () => {
     })
 
     it('orbit points span approximately 90 minutes', async () => {
-      prisma.satellite.findUnique.mockResolvedValue(mockSatelliteWithTle)
+      prisma.satellite.findMany.mockResolvedValueOnce([cacheSat])
 
       const result = await service.getOrbit(25544, nearEpoch)
 
@@ -149,21 +127,44 @@ describe('PropagationService', () => {
       const last = new Date(result.points[99].timestamp).getTime()
       const spanMinutes = (last - first) / 1000 / 60
 
-      // 99 intervals of 54s = 89.1 minutes (close to 90)
+      // 99 intervals of 54s = 89.1 minutes
       expect(spanMinutes).toBeGreaterThan(88)
       expect(spanMinutes).toBeLessThan(91)
     })
 
     it('throws SatelliteNotFoundException when satellite not found', async () => {
-      prisma.satellite.findUnique.mockResolvedValue(null)
-
       await expect(service.getOrbit(99999)).rejects.toThrow(SatelliteNotFoundException)
     })
 
-    it('throws PropagationFailedException when no TLE exists', async () => {
-      prisma.satellite.findUnique.mockResolvedValue({ ...mockSatelliteWithTle, tle: [] })
+    it('throws SatelliteNotFoundException when satellite has no TLE', async () => {
+      prisma.satellite.findMany.mockResolvedValueOnce([{ noradId: 25544, tle: [] }])
 
-      await expect(service.getOrbit(25544)).rejects.toThrow(PropagationFailedException)
+      await expect(service.getOrbit(25544)).rejects.toThrow(SatelliteNotFoundException)
+    })
+  })
+
+  describe('getPositions', () => {
+    it('returns an empty array for empty input', async () => {
+      const result = await service.getPositions([])
+      expect(result).toEqual([])
+    })
+
+    it('returns positions for all cached noradIds', async () => {
+      prisma.satellite.findMany.mockResolvedValueOnce([cacheSat])
+
+      const result = await service.getPositions([25544], nearEpoch)
+
+      expect(result).toHaveLength(1)
+      expect(result[0].noradId).toBe(25544)
+    })
+
+    it('silently skips noradIds not in the cache', async () => {
+      prisma.satellite.findMany.mockResolvedValueOnce([cacheSat])
+
+      const result = await service.getPositions([25544, 99999], nearEpoch)
+
+      expect(result).toHaveLength(1)
+      expect(result[0].noradId).toBe(25544)
     })
   })
 })

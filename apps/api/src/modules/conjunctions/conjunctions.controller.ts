@@ -29,7 +29,8 @@ export class ConjunctionsController {
       windowHours: body.windowHours ?? DEFAULT_DETECTION_OPTIONS.windowHours,
       sampleMinutes: body.sampleMinutes ?? DEFAULT_DETECTION_OPTIONS.sampleMinutes,
       thresholdKm: body.thresholdKm ?? DEFAULT_DETECTION_OPTIONS.thresholdKm,
-      minimumThresholdKm: DEFAULT_DETECTION_OPTIONS.minimumThresholdKm,
+      minimumThresholdKm: body.minimumThresholdKm ?? DEFAULT_DETECTION_OPTIONS.minimumThresholdKm,
+      perigeeApogeeBufferKm: DEFAULT_DETECTION_OPTIONS.perigeeApogeeBufferKm,
     })
   }
 

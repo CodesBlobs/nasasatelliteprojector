@@ -22,6 +22,13 @@ function objectTypeForGroup(group: string): string {
   return GROUP_OBJECT_TYPES[group] ?? (group.includes('debris') ? 'Debris' : 'Payload')
 }
 
+// CelesTrak blocks the top-level "active" group. Fetch these instead.
+const ACTIVE_SUBGROUPS = [
+  'stations', 'starlink', 'oneweb', 'weather', 'amateur',
+  'gps-ops', 'galileo', 'glonass-operational', 'iridium-NEXT', 'beidou',
+  'last-30-days',
+] as const
+
 const CHUNK_SIZE = 500
 
 @Injectable()
@@ -36,8 +43,30 @@ export class IngestService {
 
   async ingestGroup(group: string): Promise<IngestResult> {
     const start = Date.now()
-    const objectType = objectTypeForGroup(group)
 
+    // CelesTrak blocks the bulk "active" group — fan out to individual groups instead
+    if (group === 'active') {
+      const results = await Promise.allSettled(
+        ACTIVE_SUBGROUPS.map((g) => this.ingestGroup(g)),
+      )
+      const totals = results.reduce(
+        (acc, r) => {
+          if (r.status === 'fulfilled') {
+            acc.total += r.value.total
+            acc.satellitesCreated += r.value.satellitesCreated
+            acc.tlesInserted += r.value.tlesInserted
+            acc.errors += r.value.errors
+          } else {
+            this.logger.warn(`Sub-group ingest failed: ${r.reason}`)
+          }
+          return acc
+        },
+        { total: 0, satellitesCreated: 0, tlesInserted: 0, errors: 0 },
+      )
+      return { group: 'active', ...totals, durationMs: Date.now() - start }
+    }
+
+    const objectType = objectTypeForGroup(group)
     const entries = await this.celestrak.fetchGroup(group)
 
     type ParsedEntry = {

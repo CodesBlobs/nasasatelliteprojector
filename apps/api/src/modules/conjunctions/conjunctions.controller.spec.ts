@@ -11,7 +11,8 @@ const ISS_LINE2 = '2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.541790
 const ISS_LINE2_OPPOSITE = '2 25544  51.6416 247.4627 0006703 130.5360 145.0288 15.54179074380645'
 
 const TLE_EPOCH = new Date('2026-06-09T12:00:00Z')
-const SCAN_BODY = { windowHours: 1, sampleMinutes: 5 }
+// minimumThresholdKm:0 because test satellites share identical TLEs (0 km separation).
+const SCAN_BODY = { windowHours: 1, sampleMinutes: 5, minimumThresholdKm: 0 }
 
 describe('Conjunctions Controller (Integration)', () => {
   let app: INestApplication

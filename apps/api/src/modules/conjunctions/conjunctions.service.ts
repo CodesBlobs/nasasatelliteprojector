@@ -6,16 +6,15 @@ import {
   classifySeverity,
   computeRiskScore,
   findCloseApproaches,
+  parseTleOrbitalElements,
+  type DetectionOptions,
   type TrackedObject,
 } from './conjunction-detector'
+import type { ScanMetrics } from './conjunction-detector'
 
-const SATELLITE_SUMMARY = {
-  select: { id: true, noradId: true, name: true, objectType: true },
-} as const
-
-const CONJUNCTION_INCLUDE = {
-  satelliteA: SATELLITE_SUMMARY,
-  satelliteB: SATELLITE_SUMMARY,
+export const CONJUNCTION_INCLUDE = {
+  satelliteA: { select: { id: true, noradId: true, name: true, objectType: true } },
+  satelliteB: { select: { id: true, noradId: true, name: true, objectType: true } },
 } as const
 
 export interface ScanSummary {
@@ -25,6 +24,7 @@ export interface ScanSummary {
   thresholdKm: number
   eventsCreated: number
   durationMs: number
+  metrics: ScanMetrics
 }
 
 @Injectable()
@@ -48,6 +48,13 @@ export class ConjunctionsService {
     })
   }
 
+  async findManyByIds(ids: string[]) {
+    return this.prisma.conjunctionEvent.findMany({
+      where: { id: { in: ids } },
+      include: CONJUNCTION_INCLUDE,
+    })
+  }
+
   async findOne(id: string) {
     const event = await this.prisma.conjunctionEvent.findUnique({
       where: { id },
@@ -63,11 +70,7 @@ export class ConjunctionsService {
     return event
   }
 
-  /**
-   * Scans all satellites with a TLE for close approaches over the detection
-   * window and replaces previously predicted (still unconfirmed) events.
-   */
-  async runScan(options = DEFAULT_DETECTION_OPTIONS): Promise<ScanSummary> {
+  async runScan(options: DetectionOptions = DEFAULT_DETECTION_OPTIONS): Promise<ScanSummary> {
     const startedAt = Date.now()
     const startTime = new Date()
 
@@ -77,34 +80,39 @@ export class ConjunctionsService {
 
     const objects: TrackedObject[] = satellites
       .filter((s) => s.tle.length > 0)
-      .map((s) => ({
-        satelliteId: s.id,
-        noradId: s.noradId,
-        name: s.name,
-        line1: s.tle[0].line1,
-        line2: s.tle[0].line2,
-      }))
+      .map((s) => {
+        const { perigeeKm, apogeeKm } = parseTleOrbitalElements(s.tle[0].line1, s.tle[0].line2)
+        return {
+          satelliteId: s.id,
+          noradId: s.noradId,
+          name: s.name,
+          line1: s.tle[0].line1,
+          line2: s.tle[0].line2,
+          perigeeKm,
+          apogeeKm,
+        }
+      })
 
-    const approaches = findCloseApproaches(objects, startTime, options)
+    const { approaches, metrics } = findCloseApproaches(objects, startTime, options)
 
+    // Delete previous predicted events and create new ones atomically.
+    // Conjunctions with status CONFIRMED or MONITORED are kept (operator-reviewed).
     await this.prisma.$transaction([
       this.prisma.conjunctionEvent.deleteMany({
         where: { status: ConjunctionStatus.PREDICTED },
       }),
-      ...approaches.map((a) =>
-        this.prisma.conjunctionEvent.create({
-          data: {
-            satelliteAId: a.satelliteAId,
-            satelliteBId: a.satelliteBId,
-            closestApproachKm: a.closestApproachKm,
-            relativeVelocityKmS: a.relativeVelocityKmS,
-            predictedTime: a.predictedTime,
-            riskScore: computeRiskScore(a.closestApproachKm, options.thresholdKm),
-            riskLevel: classifySeverity(a.closestApproachKm),
-            status: ConjunctionStatus.PREDICTED,
-          },
-        }),
-      ),
+      this.prisma.conjunctionEvent.createMany({
+        data: approaches.map((a) => ({
+          satelliteAId: a.satelliteAId,
+          satelliteBId: a.satelliteBId,
+          closestApproachKm: a.closestApproachKm,
+          relativeVelocityKmS: a.relativeVelocityKmS,
+          predictedTime: a.predictedTime,
+          riskScore: computeRiskScore(a.closestApproachKm, options.thresholdKm),
+          riskLevel: classifySeverity(a.closestApproachKm),
+          status: ConjunctionStatus.PREDICTED,
+        })),
+      }),
     ])
 
     const summary: ScanSummary = {
@@ -114,11 +122,13 @@ export class ConjunctionsService {
       thresholdKm: options.thresholdKm,
       eventsCreated: approaches.length,
       durationMs: Date.now() - startedAt,
+      metrics,
     }
 
     this.logger.log(
-      `Conjunction scan: ${summary.scannedSatellites} satellites, ` +
-        `${summary.eventsCreated} events in ${summary.durationMs}ms`,
+      `Conjunction scan: ${metrics.satellitesScanned} sats, ` +
+        `${metrics.candidatePairs} pairs (${metrics.reductionPercent}% reduction vs naive), ` +
+        `${metrics.conjunctionsFound} conjunctions in ${metrics.durationMs}ms`,
     )
 
     return summary

@@ -49,7 +49,7 @@ describe('ConjunctionsService', () => {
         findMany: vi.fn(),
         findUnique: vi.fn(),
         deleteMany: vi.fn().mockReturnValue('deleteMany-op'),
-        create: vi.fn((args) => args),
+        createMany: vi.fn().mockReturnValue({ count: 1 }),
       },
       $transaction: vi.fn().mockResolvedValue([]),
     }
@@ -68,19 +68,19 @@ describe('ConjunctionsService', () => {
         satelliteWithTle('sat-b', 90001),
       ])
 
-      const summary = await service.runScan({ windowHours: 1, sampleMinutes: 5, thresholdKm: 10 })
+      const summary = await service.runScan({ windowHours: 1, sampleMinutes: 5, thresholdKm: 10, minimumThresholdKm: 0 })
 
       expect(summary.scannedSatellites).toBe(2)
       expect(summary.eventsCreated).toBe(1)
 
-      expect(prisma.conjunctionEvent.create).toHaveBeenCalledTimes(1)
-      const { data } = prisma.conjunctionEvent.create.mock.calls[0][0]
-      expect(data.satelliteAId).toBe('sat-a')
-      expect(data.satelliteBId).toBe('sat-b')
-      expect(data.closestApproachKm).toBeLessThan(0.001)
-      expect(data.riskLevel).toBe('CRITICAL')
-      expect(data.riskScore).toBeGreaterThan(99)
-      expect(data.status).toBe('PREDICTED')
+      expect(prisma.conjunctionEvent.createMany).toHaveBeenCalledTimes(1)
+      const [first] = prisma.conjunctionEvent.createMany.mock.calls[0][0].data
+      expect(first.satelliteAId).toBe('sat-a')
+      expect(first.satelliteBId).toBe('sat-b')
+      expect(first.closestApproachKm).toBeLessThan(0.001)
+      expect(first.riskLevel).toBe('CRITICAL')
+      expect(first.riskScore).toBeGreaterThan(99)
+      expect(first.status).toBe('PREDICTED')
     })
 
     it('replaces previously predicted events in the same transaction', async () => {
@@ -89,7 +89,7 @@ describe('ConjunctionsService', () => {
         satelliteWithTle('sat-b', 90001),
       ])
 
-      await service.runScan({ windowHours: 1, sampleMinutes: 5, thresholdKm: 10 })
+      await service.runScan({ windowHours: 1, sampleMinutes: 5, thresholdKm: 10, minimumThresholdKm: 0 })
 
       expect(prisma.conjunctionEvent.deleteMany).toHaveBeenCalledWith({
         where: { status: 'PREDICTED' },
