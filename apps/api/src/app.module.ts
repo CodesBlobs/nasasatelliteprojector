@@ -13,6 +13,9 @@ import { SystemModule } from './modules/system/system.module'
 import { WorkersModule } from './workers/workers.module'
 import { SimulationModule } from './modules/simulation/simulation.module'
 import { PrismaModule } from './common/prisma/prisma.module'
+import { AiModule } from './ai/ai.module'
+import { AuthModule } from './modules/auth/auth.module'
+import { ChatsModule } from './modules/chats/chats.module'
 
 @Module({
   imports: [
@@ -44,6 +47,9 @@ import { PrismaModule } from './common/prisma/prisma.module'
     SystemModule,
     WorkersModule,
     SimulationModule,
+    AiModule,
+    AuthModule,
+    ChatsModule,
   ],
 })
 export class AppModule {}

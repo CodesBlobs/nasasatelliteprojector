@@ -1,3 +1,8 @@
+import { config as loadEnv } from 'dotenv'
+import { resolve } from 'path'
+// Load workspace root .env. process.cwd() is apps/api/ in dev and dist/ context in prod.
+loadEnv({ path: resolve(process.cwd(), '../../.env') })
+
 import { NestFactory } from '@nestjs/core'
 import { ValidationPipe } from '@nestjs/common'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'

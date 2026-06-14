@@ -30,7 +30,7 @@ export class SatellitesService {
       this.prisma.satellite.findMany({
         skip,
         take: Math.min(take, 1000),
-        orderBy: { createdAt: 'desc' },
+        orderBy: { noradId: 'asc' },
         include: {
           tle: {
             orderBy: { epoch: 'desc' },

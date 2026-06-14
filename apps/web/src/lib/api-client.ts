@@ -2,13 +2,20 @@
 // This avoids cross-origin issues entirely and survives race conditions on startup.
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 
+function getToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('orbital_token')
+}
+
 export async function apiCall<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
+  const token = getToken()
   const response = await fetch(`${API_URL}${endpoint}`, {
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
     ...options,
@@ -76,5 +83,28 @@ export const api = {
     get: (id: string) => apiCall(`/simulation/${id}`),
     results: (id: string) => apiCall(`/simulation/${id}/results`),
     bySatellite: (satelliteId: string) => apiCall(`/simulation/satellite/${satelliteId}`),
+  },
+  ai: {
+    chat: (message: string, chatId?: string) =>
+      apiCall<{ response: string; chatId?: string }>('/ai/chat', {
+        method: 'POST',
+        body: JSON.stringify({ message, chatId }),
+      }),
+    briefing: () => apiCall<{ response: string; cached: boolean }>('/ai/briefing'),
+    explainConjunction: (id: string) =>
+      apiCall<{ response: string }>(`/ai/conjunction/${id}/explain`),
+    explainAlert: (id: string) => apiCall<{ response: string }>(`/ai/alert/${id}/explain`),
+    analyzeSimulation: (id: string) =>
+      apiCall<{ response: string }>(`/ai/simulation/${id}/analyze`),
+    conjunctionRecommendations: (id: string) =>
+      apiCall<{ response: string }>(`/ai/conjunction/${id}/recommendations`),
+  },
+  chats: {
+    list: () =>
+      apiCall<{ id: string; title: string; createdAt: string; updatedAt: string; _count: { messages: number } }[]>('/chats'),
+    get: (id: string) =>
+      apiCall<{ id: string; title: string; messages: { id: string; role: string; content: string; createdAt: string }[] }>(`/chats/${id}`),
+    delete: (id: string) =>
+      apiCall(`/chats/${id}`, { method: 'DELETE' }),
   },
 }

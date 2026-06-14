@@ -12,6 +12,7 @@ import { CollisionPanel } from './CollisionPanel'
 import ManeuverPanel from '@/components/ManeuverPanel'
 import SimulationResults from '@/components/SimulationResults'
 import OrbitComparison from '@/components/OrbitComparison'
+import { AICopilotPanel } from '@/components/ai/AICopilotPanel'
 import type { SimulationWithResult } from '@orbital/shared'
 
 export interface Satellite {
@@ -113,6 +114,9 @@ export default function GlobeView() {
   const resetViewRef = useRef<(() => void) | null>(null)
 
   const [resolutionScale, setResolutionScale] = useState(1.0)
+
+  // AI Copilot state
+  const [showAiCopilot, setShowAiCopilot] = useState(false)
 
   // Maneuver simulation state
   const [showManeuverPanel, setShowManeuverPanel] = useState(false)
@@ -499,6 +503,16 @@ export default function GlobeView() {
     setSelectedConjunctionId((prev) => (prev === id ? null : id))
   }, [])
 
+  // Listen for focus events from the pop-out AI copilot window
+  useEffect(() => {
+    const bc = new BroadcastChannel('orbital-copilot')
+    bc.onmessage = (e) => {
+      if (e.data?.type === 'focus-satellite') handleSelectSatelliteWithReset(e.data.noradId)
+      if (e.data?.type === 'focus-conjunction') handleSelectConjunction(e.data.id)
+    }
+    return () => bc.close()
+  }, [handleSelectSatelliteWithReset, handleSelectConjunction])
+
   const handleTimeShift = useCallback((deltaMs: number) => {
     setSimulatedTime((t) => new Date(t.getTime() + deltaMs))
   }, [])
@@ -748,8 +762,8 @@ export default function GlobeView() {
         </div>
       </div>
 
-      {/* Collision panel — top-right */}
-      <div className="absolute top-3 right-3 z-10">
+      {/* Right sidebar — collision panel + AI copilot toggle */}
+      <div className="absolute top-3 right-3 z-10 flex flex-col gap-2 items-end">
         <CollisionPanel
           conjunctions={conjunctions}
           selectedId={selectedConjunctionId}
@@ -757,6 +771,24 @@ export default function GlobeView() {
           onSelect={handleSelectConjunction}
           onScan={handleScan}
         />
+        {!showAiCopilot && (
+          <button
+            onClick={() => setShowAiCopilot(true)}
+            className="bg-slate-900/90 border border-cyan-700/60 hover:border-cyan-400 text-cyan-400 hover:text-cyan-200 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors flex items-center gap-1.5"
+          >
+            <span>✦</span> AI Copilot
+          </button>
+        )}
+        {/* Panel is position:fixed — renders outside this container */}
+        {showAiCopilot && (
+          <AICopilotPanel
+            selectedConjunctionId={selectedConjunctionId}
+            selectedSimulationId={simulationResult?.id ?? null}
+            onClose={() => setShowAiCopilot(false)}
+            onFocusSatellite={handleSelectSatelliteWithReset}
+            onFocusConjunction={handleSelectConjunction}
+          />
+        )}
       </div>
     </div>
   )

@@ -41,6 +41,7 @@ export class PropagationService implements OnModuleInit {
       const rows = await this.prisma.satellite.findMany({
         skip,
         take: PAGE,
+        orderBy: { noradId: 'asc' },
         include: { tle: { orderBy: { epoch: 'desc' }, take: 1, select: { line1: true, line2: true } } },
       })
       for (const sat of rows) {

@@ -1,6 +1,4 @@
 import type { Metadata } from 'next'
-import { Header } from '@/components/Header'
-import { Sidebar } from '@/components/Sidebar'
 import { Providers } from './providers'
 import '@/styles/globals.css'
 
@@ -12,14 +10,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="flex flex-col h-screen bg-slate-950">
-        <Providers>
-          <Header />
-          <div className="flex flex-1 overflow-hidden">
-            <Sidebar />
-            <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
-          </div>
-        </Providers>
+      <body className="bg-slate-950 text-slate-200">
+        <Providers>{children}</Providers>
       </body>
     </html>
   )
