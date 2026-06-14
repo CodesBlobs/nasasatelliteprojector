@@ -12,9 +12,9 @@ export function Sidebar() {
     <aside className="w-64 bg-slate-800 text-white border-r border-slate-700 flex flex-col">
       <nav className="flex-1 px-4 py-6 space-y-2">
         <Link
-          href="/"
+          href="/dashboard"
           className={`block px-4 py-2 rounded transition ${
-            isActive('/') ? 'bg-blue-600' : 'hover:bg-slate-700'
+            isActive('/dashboard') ? 'bg-blue-600' : 'hover:bg-slate-700'
           }`}
         >
           Dashboard
