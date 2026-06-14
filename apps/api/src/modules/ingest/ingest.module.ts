@@ -4,10 +4,11 @@ import { TleModule } from '../tle/tle.module'
 import { CelestrakService } from './celestrak.service'
 import { IngestController } from './ingest.controller'
 import { IngestService } from './ingest.service'
+import { IngestScheduler } from './ingest.scheduler'
 
 @Module({
   imports: [PrismaModule, TleModule],
   controllers: [IngestController],
-  providers: [IngestService, CelestrakService],
+  providers: [IngestService, CelestrakService, IngestScheduler],
 })
 export class IngestModule {}
