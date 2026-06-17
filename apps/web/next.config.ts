@@ -1,17 +1,17 @@
 import type { NextConfig } from 'next'
 
-const API_ORIGIN = process.env.API_ORIGIN || 'http://localhost:3001'
-
 const config: NextConfig = {
   reactStrictMode: true,
   images: {
     unoptimized: true,
   },
   async rewrites() {
+    const origin = process.env.API_ORIGIN
+    if (!origin) return []
     return [
       {
         source: '/api/:path*',
-        destination: `${API_ORIGIN}/:path*`,
+        destination: `${origin}/:path*`,
       },
     ]
   },
