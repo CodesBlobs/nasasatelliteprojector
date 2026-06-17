@@ -24,7 +24,7 @@ async function proxy(request: NextRequest, params: Promise<{ path: string[] }>) 
 
   const responseHeaders = new Headers()
   response.headers.forEach((value, key) => {
-    if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+    if (!['transfer-encoding', 'connection', 'content-encoding'].includes(key.toLowerCase())) {
       responseHeaders.set(key, value)
     }
   })
