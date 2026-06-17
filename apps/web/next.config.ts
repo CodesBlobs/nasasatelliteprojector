@@ -5,16 +5,6 @@ const config: NextConfig = {
   images: {
     unoptimized: true,
   },
-  async rewrites() {
-    const origin = process.env.API_ORIGIN
-    if (!origin) return []
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${origin}/:path*`,
-      },
-    ]
-  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.module = config.module ?? {}
