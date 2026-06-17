@@ -24,8 +24,8 @@ export class SatellitesController {
   @ApiOperation({ summary: 'List all satellites' })
   @ApiQuery({ name: 'skip', required: false, type: Number })
   @ApiQuery({ name: 'take', required: false, type: Number })
-  async findAll(@Query('skip') skip?: number, @Query('take') take?: number) {
-    return this.service.findAll(skip, take)
+  async findAll(@Query('skip') skip?: string, @Query('take') take?: string) {
+    return this.service.findAll(skip ? parseInt(skip, 10) : 0, take ? parseInt(take, 10) : 100)
   }
 
   @Get(':id')
