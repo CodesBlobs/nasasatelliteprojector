@@ -7,23 +7,32 @@ async function proxy(request: NextRequest, params: Promise<{ path: string[] }>) 
   const backendUrl = new URL(`/${path.join('/')}`, API_ORIGIN)
   backendUrl.search = request.nextUrl.search
 
-  const headers = new Headers(request.headers)
-  headers.delete('host')
+  const headers = new Headers()
+  const contentType = request.headers.get('content-type')
+  if (contentType) headers.set('content-type', contentType)
+  const auth = request.headers.get('authorization')
+  if (auth) headers.set('authorization', auth)
 
   const isBodyless = ['GET', 'HEAD'].includes(request.method)
+  const body = isBodyless ? undefined : await request.text()
 
   const response = await fetch(backendUrl.toString(), {
     method: request.method,
     headers,
-    body: isBodyless ? undefined : request.body,
-    // @ts-expect-error -- duplex required for streaming request bodies
-    duplex: 'half',
+    body,
+  })
+
+  const responseHeaders = new Headers()
+  response.headers.forEach((value, key) => {
+    if (!['transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+      responseHeaders.set(key, value)
+    }
   })
 
   return new NextResponse(response.body, {
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers,
+    headers: responseHeaders,
   })
 }
 
