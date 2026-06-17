@@ -11,7 +11,6 @@
 - ✅ `.prettierrc.json` - Code formatting rules
 - ✅ `.env` - Local environment variables
 - ✅ `README.md` - Project documentation
-- ✅ `CLAUDE.md` - Development context for Claude Code
 
 ### Shared Packages
 - ✅ `packages/shared/` - TypeScript types

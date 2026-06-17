@@ -59,3 +59,7 @@ apps/web/public/cesium/
 
 # Misc
 .cache/
+
+# Local dev tooling (not for version control)
+.claude/
+CLAUDE.md
