@@ -125,6 +125,7 @@ export const CesiumContainer = memo(function CesiumContainer({
     if (!containerRef.current) return
 
     ;(window as Window & { CESIUM_BASE_URL?: string }).CESIUM_BASE_URL = '/cesium/'
+    Cesium.Ion.defaultAccessToken = ''
 
     // CSS flex chain resolves to 0×0 at init — measure directly from the DOM
     const aside = document.querySelector('aside')
@@ -141,6 +142,7 @@ export const CesiumContainer = memo(function CesiumContainer({
     })
 
     const viewer = new Cesium.Viewer(containerRef.current, {
+      creditContainer: document.createElement('div'),
       animation: false,
       baseLayerPicker: false,
       fullscreenButton: false,
