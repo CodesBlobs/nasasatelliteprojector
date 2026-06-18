@@ -1,10 +1,10 @@
 
 
-# 🚀 Orbital - Space Tracker Thingy
+#  Orbital - Space Tracker Thingy
 
-This is a project that tracks satellites in real time, shows where they are in space, and checks if they might crash into each other (scary stuff 😬).
+This is a project that tracks satellites in real time, shows where they are in space, and checks if they might crash into each other and go kaboom 💀💀💀
 
-## 🧠 What it does
+## What it does
 
 * Tracks satellites orbiting Earth
 * Predicts where they’ll go next
@@ -13,7 +13,7 @@ This is a project that tracks satellites in real time, shows where they are in s
 
 ---
 
-## 🧱 How it’s built
+##  How it’s built
 
 It’s a big project with a few parts:
 
@@ -24,13 +24,13 @@ apps/
 
 packages/
   ├── shared (stuff both sides use)
-  ├── orbital-core (space math stuff 🪐)
+  ├── orbital-core (space math stuff )
   └── config (settings so everything behaves)
 ```
 
 ---
 
-## 🛠️ Tech used
+##  Tech used
 
 * Backend: NestJS, PostgreSQL, Redis
 * Frontend: Next.js, React, TailwindCSS
@@ -84,45 +84,46 @@ Now it runs:
 
 ---
 
-## 📦 What’s inside
+## What’s inside
 
-### 🧠 Backend (API)
+### Backend (API)
 
 Handles all the logic like:
 
 * satellites
 * space data (TLEs)
 * orbit predictions
-* collision warnings (future feature 👀)
+* collision warnings 
 
-### 🌐 Frontend (Web)
+### Frontend (Web)
 
 A dashboard where you can:
 
 * see satellites
 * check alerts
-* maybe eventually see a 3D Earth (cool stuff)
+* see a 3D Earth (cool stuff)
+* ask ai to help you with the conjunctions(yes i'm sorry i need to put ai slop in here)
 
 ---
 
-## 🧪 Features (in progress)
+## Features (in progress)
 
-### ✅ Done
+### Done
 
 * Basic backend setup
 * Basic frontend
 * Database connected
 
-### 🚧 Coming soon
+### Coming soon
 
 * Import satellite data
 * Orbit calculations
-* 3D Earth view 🌍
-* Collision warnings 🚨
+* 3D Earth view 
+* Collision warnings 
 * Live updates
 
 ---
 
-## 📄 License
+## License
 
 MIT (Don't sue me pls i'm not rich)
