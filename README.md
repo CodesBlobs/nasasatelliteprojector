@@ -1,227 +1,128 @@
-# Orbital - Space Traffic Control Platform
 
-Real-time satellite tracking, orbital mechanics propagation, and conjunction detection for space traffic management.
 
-## Architecture
+# 🚀 Orbital - Space Tracker Thingy
 
-Monorepo structure using Turborepo and pnpm workspaces:
+This is a project that tracks satellites in real time, shows where they are in space, and checks if they might crash into each other (scary stuff 😬).
+
+## 🧠 What it does
+
+* Tracks satellites orbiting Earth
+* Predicts where they’ll go next
+* Warns if two satellites might get too close
+* Shows everything in a simple dashboard
+
+---
+
+## 🧱 How it’s built
+
+It’s a big project with a few parts:
 
 ```
 apps/
-  ├── api/        # NestJS backend
-  └── web/        # Next.js frontend
+  ├── api (the brain / backend)
+  └── web (the website you see)
 
 packages/
-  ├── shared/     # Shared types
-  ├── orbital-core/  # Orbital mechanics library
-  └── config/     # Shared configs (TS, ESLint, etc.)
+  ├── shared (stuff both sides use)
+  ├── orbital-core (space math stuff 🪐)
+  └── config (settings so everything behaves)
 ```
 
-## Tech Stack
+---
 
-**Backend:** NestJS, PostgreSQL, Prisma, Redis
-**Frontend:** Next.js, React, TailwindCSS, TanStack Query
-**Orbital Mechanics:** satellite.js
-**Infrastructure:** Docker Compose, Turborepo
+## 🛠️ Tech used
 
-## Prerequisites
+* Backend: NestJS, PostgreSQL, Redis
+* Frontend: Next.js, React, TailwindCSS
+* Space math: satellite.js (for orbit calculations)
+* Dev tools: Docker, Turborepo
 
-- Node.js 18+
-- pnpm 8+
-- Docker & Docker Compose
+Basically: a mix of web dev + space nerd stuff.
 
-## Quick Start
+---
 
-### 1. Install dependencies
+## ⚡ How to run it
+
+### 1. Install stuff
 
 ```bash
 pnpm install
 ```
 
-### 2. Start services
+### 2. Start database + Redis
 
 ```bash
 docker compose up -d
 ```
 
 This starts:
-- PostgreSQL on `localhost:5432`
-- Redis on `localhost:6379`
 
-### 3. Setup database
+* Database (Postgres)
+* Cache (Redis)
+
+---
+
+### 3. Set up database
 
 ```bash
 pnpm db:generate
 cd apps/api && pnpm prisma migrate dev --name init
 ```
 
-### 4. Start development servers
+---
+
+### 4. Start the project
 
 ```bash
 pnpm dev
 ```
 
-This will start:
-- API on `http://localhost:3001`
-- Web on `http://localhost:3000`
+Now it runs:
 
-### 5. Access the application
+* Website → [http://localhost:3000](http://localhost:3000)
+* API → [http://localhost:3001](http://localhost:3001)
 
-- **Web UI:** http://localhost:3000
-- **API Docs:** http://localhost:3001/api
-- **Health Check:** http://localhost:3001/health
+---
 
-## Project Structure
+## 📦 What’s inside
 
-### API (`apps/api`)
+### 🧠 Backend (API)
 
-NestJS application with modular architecture:
+Handles all the logic like:
 
-- `health` - System health checks
-- `satellites` - Satellite records
-- `tle` - Two-Line Element imports and parsing
-- `propagation` - Orbital propagation (Phase 3)
-- `conjunctions` - Conjunction detection (Phase 5)
-- `alerts` - Alert system (Phase 6)
-- `simulation` - Simulation engine
+* satellites
+* space data (TLEs)
+* orbit predictions
+* collision warnings (future feature 👀)
 
-Database models:
-- `Satellite` - Satellite metadata
-- `TLE` - Two-Line Elements
-- `PositionSnapshot` - Calculated positions
-- `ConjunctionEvent` - Detected conjunctions
+### 🌐 Frontend (Web)
 
-### Web (`apps/web`)
+A dashboard where you can:
 
-Next.js frontend with clean engineering dashboard:
+* see satellites
+* check alerts
+* maybe eventually see a 3D Earth (cool stuff)
 
-- `/` - Dashboard with system status
-- `/satellites` - Satellite listing
-- `/alerts` - Alert monitoring
-- `/globe` - 3D visualization (Phase 4)
+---
 
-### Shared Packages
+## 🧪 Features (in progress)
 
-- `@orbital/shared` - TypeScript types and interfaces
-- `@orbital/core` - TLE parsing, orbital propagation
+### ✅ Done
 
-## API Endpoints
+* Basic backend setup
+* Basic frontend
+* Database connected
 
-### Health
+### 🚧 Coming soon
 
-```
-GET /health
-```
+* Import satellite data
+* Orbit calculations
+* 3D Earth view 🌍
+* Collision warnings 🚨
+* Live updates
 
-### Satellites
+---
 
-```
-GET /satellites?skip=0&take=100          # List satellites
-GET /satellites/:id                      # Get by ID
-GET /satellites/norad/:noradId           # Get by NORAD ID
-POST /satellites                         # Create satellite
-```
+## 📄 License
 
-### TLE
-
-```
-POST /tle/import                         # Import TLE
-GET /tle/latest/:satelliteId             # Latest TLE
-GET /tle/history/:satelliteId            # TLE history
-```
-
-## Development
-
-### Run tests
-
-```bash
-pnpm test
-```
-
-### Format code
-
-```bash
-pnpm format
-```
-
-### Lint
-
-```bash
-pnpm lint
-```
-
-### Build for production
-
-```bash
-pnpm build
-```
-
-## Environment Variables
-
-See `.env.example` for all options:
-
-```bash
-cp .env.example .env
-```
-
-API environment (`apps/api/.env`):
-- `DATABASE_URL` - PostgreSQL connection
-- `REDIS_URL` - Redis connection
-- `API_PORT` - API server port
-- `NODE_ENV` - Environment
-
-Web environment (`apps/web/.env.local`):
-- `NEXT_PUBLIC_API_URL` - API endpoint
-
-## Database
-
-Using Prisma ORM with PostgreSQL.
-
-### Create migration
-
-```bash
-cd apps/api
-pnpm prisma migrate dev --name <migration-name>
-```
-
-### View database
-
-```bash
-cd apps/api
-pnpm prisma studio
-```
-
-## Phases
-
-### Phase 1 ✅ (Current)
-- Bootstrap monorepo
-- NestJS API with health endpoint
-- Next.js frontend with pages
-- Prisma database schema
-- Docker Compose setup
-
-### Phase 2
-- TLE import endpoint
-- Validation and parsing
-- Tests
-
-### Phase 3
-- Orbital propagation with satellite.js
-- Position calculation API
-
-### Phase 4
-- CesiumJS integration
-- 3D Earth visualization
-- Real-time satellite rendering
-
-### Phase 5
-- Conjunction detection algorithm
-- Risk assessment
-
-### Phase 6
-- Alert system
-- Dashboard alerts UI
-
-## License
-
-MIT
+MIT (Don't sue me pls i'm not rich)

@@ -63,3 +63,5 @@ apps/web/public/cesium/
 # Local dev tooling (not for version control)
 .claude/
 CLAUDE.md
+*.md
+!README.md
