@@ -73,8 +73,9 @@ export default function CollisionsPage() {
 
   const fetchConjunctions = useCallback(async () => {
     try {
-      const res = (await api.conjunctions.list(0, 200)) as { data: Conjunction[] }
-      setConjunctions(res.data)
+      const raw = await api.conjunctions.list(0, 200)
+      const data: Conjunction[] = Array.isArray(raw) ? (raw as Conjunction[]) : (raw as { data: Conjunction[] }).data
+      setConjunctions(data)
     } catch (err) {
       console.error('Failed to load conjunctions:', err)
     } finally {

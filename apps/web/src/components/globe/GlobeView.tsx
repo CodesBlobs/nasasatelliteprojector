@@ -392,8 +392,8 @@ export default function GlobeView() {
 
   const fetchConjunctions = useCallback(async () => {
     try {
-      const res = (await api.conjunctions.active(0, 200)) as { data: Conjunction[] }
-      const events = res.data
+      const raw = await api.conjunctions.active(0, 200)
+      const events: Conjunction[] = Array.isArray(raw) ? (raw as Conjunction[]) : (raw as { data: Conjunction[] }).data
       setConjunctions((prev) => {
         const signature = (list: Conjunction[]) =>
           list.map((c) => `${c.id}:${c.predictedTime}:${c.status}`).join('|')
