@@ -15,10 +15,10 @@ const config: NextConfig = {
       // Cesium's ThirdParty files contain octal escape sequences in template
       // literals which are a syntax error in strict mode. Run them through a
       // custom loader that rewrites the octals to unicode escapes before SWC
-      // sees them.
+      // sees them. Use __dirname so the path is absolute and works on Vercel.
       config.module.rules.unshift({
-        test: /google-earth-dbroot-parser\.js$/,
-        loader: path.resolve('./octal-escape-loader.cjs'),
+        test: /node_modules[\\/]cesium[\\/].*\.js$/,
+        loader: path.join(__dirname, 'octal-escape-loader.cjs'),
       })
     }
     return config
