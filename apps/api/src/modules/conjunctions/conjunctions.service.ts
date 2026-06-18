@@ -33,19 +33,42 @@ export class ConjunctionsService {
 
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
-    return this.prisma.conjunctionEvent.findMany({
-      include: CONJUNCTION_INCLUDE,
-      orderBy: { predictedTime: 'asc' },
-    })
+  async findAll(skip = 0, take = 100) {
+    const [data, total] = await Promise.all([
+      this.prisma.conjunctionEvent.findMany({
+        skip,
+        take: Math.min(take, 500),
+        include: CONJUNCTION_INCLUDE,
+        orderBy: { predictedTime: 'asc' },
+      }),
+      this.prisma.conjunctionEvent.count(),
+    ])
+    return { data, pagination: { total, skip, take: data.length } }
   }
 
-  async findActive() {
-    return this.prisma.conjunctionEvent.findMany({
-      where: { status: { not: ConjunctionStatus.RESOLVED } },
-      include: CONJUNCTION_INCLUDE,
-      orderBy: { predictedTime: 'asc' },
-    })
+  async findActive(skip = 0, take = 100) {
+    const where = { status: { not: ConjunctionStatus.RESOLVED } }
+    const [data, total] = await Promise.all([
+      this.prisma.conjunctionEvent.findMany({
+        where,
+        skip,
+        take: Math.min(take, 500),
+        include: CONJUNCTION_INCLUDE,
+        orderBy: { riskScore: 'desc' },
+      }),
+      this.prisma.conjunctionEvent.count({ where }),
+    ])
+    return { data, pagination: { total, skip, take: data.length } }
+  }
+
+  async getStats() {
+    const [total, active, high, critical] = await Promise.all([
+      this.prisma.conjunctionEvent.count(),
+      this.prisma.conjunctionEvent.count({ where: { status: { not: ConjunctionStatus.RESOLVED } } }),
+      this.prisma.conjunctionEvent.count({ where: { riskLevel: 'HIGH', status: { not: ConjunctionStatus.RESOLVED } } }),
+      this.prisma.conjunctionEvent.count({ where: { riskLevel: 'CRITICAL', status: { not: ConjunctionStatus.RESOLVED } } }),
+    ])
+    return { total, active, high, critical }
   }
 
   async findManyByIds(ids: string[]) {

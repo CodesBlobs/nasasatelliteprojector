@@ -49,7 +49,7 @@ export class ConjunctionWorker extends WorkerHost {
     })
 
     // Fetch the newly created conjunction IDs and dispatch alert generation
-    const newConjunctions = await this.conjunctions.findActive()
+    const { data: newConjunctions } = await this.conjunctions.findActive(0, 500)
     if (newConjunctions.length > 0) {
       await this.alertQueue.add('generate', {
         conjunctionIds: newConjunctions.map((c) => c.id),

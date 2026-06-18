@@ -61,8 +61,9 @@ export const api = {
     getOrbit: (noradId: number) => apiCall(`/satellites/${noradId}/orbit`),
   },
   conjunctions: {
-    list: () => apiCall('/conjunctions'),
-    active: () => apiCall('/conjunctions/active'),
+    list: (skip = 0, take = 100) => apiCall(`/conjunctions?skip=${skip}&take=${take}`),
+    active: (skip = 0, take = 100) => apiCall(`/conjunctions/active?skip=${skip}&take=${take}`),
+    stats: () => apiCall('/conjunctions/stats'),
     get: (id: string) => apiCall(`/conjunctions/${id}`),
     scan: (options?: { windowHours?: number; sampleMinutes?: number; thresholdKm?: number }) =>
       apiCall('/conjunctions/scan', { method: 'POST', body: JSON.stringify(options ?? {}) }),

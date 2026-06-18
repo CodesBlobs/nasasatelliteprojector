@@ -1,5 +1,5 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common'
-import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
+import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common'
+import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { ConjunctionsService } from './conjunctions.service'
 import { DEFAULT_DETECTION_OPTIONS } from './conjunction-detector'
 import { ScanDto } from './dto/scan.dto'
@@ -9,16 +9,26 @@ import { ScanDto } from './dto/scan.dto'
 export class ConjunctionsController {
   constructor(private service: ConjunctionsService) {}
 
+  @Get('stats')
+  @ApiOperation({ summary: 'Get conjunction counts by status/risk (lightweight)' })
+  getStats() {
+    return this.service.getStats()
+  }
+
   @Get()
   @ApiOperation({ summary: 'List all conjunction events' })
-  findAll() {
-    return this.service.findAll()
+  @ApiQuery({ name: 'skip', required: false, type: Number })
+  @ApiQuery({ name: 'take', required: false, type: Number })
+  findAll(@Query('skip') skip?: string, @Query('take') take?: string) {
+    return this.service.findAll(skip ? parseInt(skip, 10) : 0, take ? parseInt(take, 10) : 100)
   }
 
   @Get('active')
-  @ApiOperation({ summary: 'List unresolved conjunction events' })
-  findActive() {
-    return this.service.findActive()
+  @ApiOperation({ summary: 'List unresolved conjunction events (highest risk first)' })
+  @ApiQuery({ name: 'skip', required: false, type: Number })
+  @ApiQuery({ name: 'take', required: false, type: Number })
+  findActive(@Query('skip') skip?: string, @Query('take') take?: string) {
+    return this.service.findActive(skip ? parseInt(skip, 10) : 0, take ? parseInt(take, 10) : 100)
   }
 
   @Post('scan')

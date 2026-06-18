@@ -23,8 +23,8 @@ export default function LandingPage() {
       .then((s) => setStats(s as Stats))
       .catch(() => null)
     api.conjunctions
-      .active()
-      .then((c) => setConjunctions({ active: (c as unknown[]).length }))
+      .stats()
+      .then((c) => setConjunctions(c as ConjunctionStat))
       .catch(() => null)
   }, [])
 
